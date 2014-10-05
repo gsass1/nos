@@ -82,7 +82,7 @@ void shell(void)
 
 loop:
 	memset(0, buffer, 256);
-    kprintf("\nGianOS: ");
+    kprintf("\nNOS: ");
     int i = 0;
 	while(1) {
         char c = kbd_getc();
@@ -130,7 +130,7 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
         panic("Can't find initrd\n");
     }
 
-	kprintf("GianOS is booting...\n");
+	kprintf("NOS is booting...\n");
 
 	// Initialize the annoying x86 stuff
     gdt_init();
@@ -159,6 +159,6 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	tasking_init();
 
 	// Hooray, we are booted.
-    kprintf("Welcome to GianOS!\n");
+    kprintf("Welcome to NOS!\n");
 	shell();
 }

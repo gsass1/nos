@@ -99,6 +99,7 @@ iso: $(BIN)
 	cp $(BIN) iso
 	nm $(BIN) > symtable
 	cp symtable iso
+	rm -f symtable
 	mkisofs -R -b boot/grub/stage2_eltorito -no-emul-boot -boot-load-size 4 -boot-info-table -o $(ISO) iso
 
 clean:

@@ -1,3 +1,7 @@
 *.iso
 *.elf
 *.o
+*.swp
+iso/symtable
+
+serial_com1.txt
