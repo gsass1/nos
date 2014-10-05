@@ -1,0 +1,757 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"init",
+				"initrd_root"
+			],
+			[
+				"initr",
+				"initrd_locaton"
+			],
+			[
+				"serial",
+				"serial_write_str"
+			],
+			[
+				"initrd",
+				"initrd_root"
+			],
+			[
+				"symbol",
+				"symbol_map_raw"
+			],
+			[
+				"sym",
+				"symbol_map"
+			],
+			[
+				"getp",
+				"getpname"
+			],
+			[
+				"nex",
+				"next_pid"
+			],
+			[
+				"current",
+				"current_task"
+			],
+			[
+				"current_",
+				"current_directory"
+			],
+			[
+				"tables",
+				"tables_physical"
+			],
+			[
+				"new",
+				"new_stack_start"
+			],
+			[
+				"kernel",
+				"kernel_directory"
+			],
+			[
+				"clone",
+				"clone_directory"
+			],
+			[
+				"int",
+				"initial_stack"
+			],
+			[
+				"curre",
+				"current_task"
+			],
+			[
+				"read",
+				"read_eip"
+			],
+			[
+				"vga_set",
+				"vga_set_cursor"
+			],
+			[
+				"tab",
+				"tables"
+			],
+			[
+				"kmal",
+				"kmalloc_a"
+			],
+			[
+				"table",
+				"table_idx"
+			],
+			[
+				"kerne",
+				"kernel_directory"
+			],
+			[
+				"margin",
+				"margin"
+			],
+			[
+				"backg",
+				"background-color"
+			],
+			[
+				"html",
+				"htmlspecialchars"
+			]
+		]
+	},
+	"buffers":
+	[
+		{
+			"file": "initrd.c",
+			"settings":
+			{
+				"buffer_size": 5296,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "main.c",
+			"settings":
+			{
+				"buffer_size": 2604,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "kernel.c",
+			"settings":
+			{
+				"buffer_size": 2881,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "vfs.c",
+			"settings":
+			{
+				"buffer_size": 1346,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "/E/Dropbox/Projects/GianOS/include/vfs.h",
+			"settings":
+			{
+				"buffer_size": 1962,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "/E/Dropbox/Projects/GianOS/drivers/keyboard.c",
+			"settings":
+			{
+				"buffer_size": 2998,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "kmalloc.c",
+			"settings":
+			{
+				"buffer_size": 5708,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "task.c",
+			"settings":
+			{
+				"buffer_size": 9614,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "/E/Dropbox/Projects/GianOS/serial_com1.txt",
+			"settings":
+			{
+				"buffer_size": 1116,
+				"line_ending": "Unix"
+			}
+		}
+	],
+	"build_system": "Packages/User/untitled.sublime-build",
+	"command_palette":
+	{
+		"height": 0.0,
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"console":
+	{
+		"height": 0.0
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"file_history":
+	[
+		"/E/Dropbox/Projects/GianOS/serial_com1.txt",
+		"/E/Dropbox/Projects/GianOS/kernel/isr.c",
+		"/E/Dropbox/Projects/GianOS/kernel/pic.c",
+		"/E/Dropbox/Projects/GianOS/kernel/pit.c",
+		"/E/Dropbox/Projects/GianOS/kernel/idt.c",
+		"/E/Dropbox/Projects/GianOS/kernel/vfs.c",
+		"/E/Dropbox/Projects/GianOS/kernel/kernel.c",
+		"/E/Dropbox/Projects/GianOS/kernel/paging.c",
+		"/E/Dropbox/Projects/GianOS/kernel/mutex.c",
+		"/E/Dropbox/Projects/GianOS/kernel/task.c",
+		"/E/Dropbox/Projects/GianOS/kernel/main.c",
+		"/E/Dropbox/Projects/GianOS/include/mutex.h",
+		"/E/Dropbox/Projects/GianOS/kernel/gdt.c",
+		"/E/Dropbox/Projects/GianOS/kernel/initrd.c",
+		"/E/Dropbox/Projects/GianOS/include/kernel.h",
+		"/E/Dropbox/Projects/GianOS/kernel/vga.c",
+		"/E/Dropbox/Projects/GianOS/kernel/kmalloc.c",
+		"/E/Dropbox/Projects/GianOS/drivers/keyboard.c",
+		"/E/Dropbox/Projects/GianOS/drivers/serial.c",
+		"/E/Dropbox/Projects/GianOS/include/va_list.h",
+		"/E/Dropbox/Projects/GianOS/kernel/vsprintf.c",
+		"/E/Dropbox/Projects/GianOS/include/vsprintf.h",
+		"/E/Dropbox/Projects/GianOS/bochsrc.txt",
+		"/E/Dropbox/Projects/GianOS/include/string.h",
+		"/E/Dropbox/Projects/GianOS/kernel/string.c",
+		"/E/Dropbox/Projects/GianOS/include/initrd.h",
+		"/E/Dropbox/Projects/GianOS/Makefile",
+		"/E/Dropbox/Projects/GianOS/iso/boot/grub/menu.lst",
+		"/E/Dropbox/Projects/GianOS/symtable",
+		"/E/Dropbox/Projects/GianOS/iso/initrd.tar",
+		"/E/Dropbox/Projects/GianOS/initrd.tar",
+		"/E/Dropbox/Projects/GianOS/kernel.map",
+		"/E/Dropbox/Projects/GianOS/include/vfs.h",
+		"/E/Dropbox/Projects/GianOS/boot/boot.S",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/mutex.h",
+		"/E/Dropbox/Projects/GianOS/include/task.h",
+		"/C/Users/Gian/Downloads/multitasking.tar/wdzvqa/src/task.c",
+		"/C/Users/Gian/Downloads/multitasking.tar/wdzvqa/src/paging.c",
+		"/C/Users/Gian/Downloads/multitasking.tar/wdzvqa/src/kheap.c",
+		"/E/Dropbox/Projects/GianOS/include/mm.h",
+		"/E/Dropbox/Projects/GianOS/include/debug.h",
+		"/C/Users/Gian/Downloads/msdos/msdos/v20source/SYSCALL.ASM",
+		"/C/Users/Gian/Downloads/msdos/msdos/v20source/STDIO.ASM",
+		"/C/Users/Gian/Downloads/msdos/msdos/v20source/ALLOC.ASM",
+		"/C/Users/Gian/Downloads/gdt_idt.tar/SjAb1a/src/isr.h",
+		"/E/Dropbox/Projects/GianOS/bochsdbg.bat",
+		"/E/Dropbox/Projects/GianOS/start_bochs.bat",
+		"/E/Dropbox/Projects/GianOS/kernel/copy_page_physical.S",
+		"/E/Dropbox/Projects/GianOS/kernel/interrupt.S",
+		"/E/Dropbox/Projects/GianOS/boot/boot.o",
+		"/E/Dropbox/Projects/GianOS/kernel/sched.c",
+		"/E/Dropbox/Projects/GianOS/include/vga.h",
+		"/E/Dropbox/Projects/GianOS/include/keyboard.h",
+		"/E/Dropbox/Projects/GianOS/include/serial.h",
+		"/E/Dropbox/Projects/GianOS/include/idt.h",
+		"/E/Dropbox/Projects/GianOS/include/pic.h",
+		"/E/Dropbox/Projects/GianOS/include/pit.h",
+		"/E/Dropbox/Projects/GianOS/include/gdt.h",
+		"/C/Users/Gian/AppData/Roaming/Sublime Text 2/Packages/Default/Preferences.sublime-settings",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/serial.txt",
+		"/E/Dropbox/Projects/GianOS/kernel/vsprintf.h",
+		"/C/Users/Gian/AppData/Roaming/Sublime Text 2/Packages/User/untitled.sublime-build",
+		"/E/Dropbox/Projects/GianOS/debug.bat",
+		"/E/Dropbox/Projects/GianOS/include/stdint.h",
+		"/E/Dropbox/Projects/GianOS/linker.ld",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/bochslog.txt",
+		"/E/Dropbox/Projects/GianOS/make_iso_win.bat",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/vsprintf.c",
+		"/C/cygwin64/usr/bin/mkisofs",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/terminal.c",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/vsprintf.h",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/mem.h",
+		"/E/Dropbox/Projects/GianOS/.gitignore",
+		"/E/Dropbox/Projects/GianOS/include/io.h",
+		"/C/RosBE/Build-Shared.cmd",
+		"/E/Dropbox/NSEngine/NSEngine/src/main.cpp",
+		"/E/Dropbox/NSEngine/NSEngine/src/Filesystem.cpp",
+		"/E/Dropbox/NSEngine/NSEngine/src/Font.cpp",
+		"/E/Dropbox/NSEngine/NSEngine/include/ICommon.h",
+		"/E/Dropbox/NSEngine/NSEngine/include/IInput.h",
+		"/E/Dropbox/NSEngine/NSEngine/include/NSEngine.h",
+		"/E/Dropbox/PonyTerra/PonyTerra/src/Game.cpp",
+		"/E/Dropbox/PonyTerra/PonyTerra/src/Level.cpp",
+		"/E/Dropbox/Solver/src/main.c",
+		"/C/Users/Gian/Downloads/Download",
+		"/C/Users/Gian/.atom/init.coffee",
+		"/C/Users/Gian/Desktop/kernel/shell.bat",
+		"/C/Users/Gian/Desktop/kernel/kernel/Makefile",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/isodir/boot/grub/menu.lst",
+		"/G/BOOT/GRUB/MENU.LST",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/Makefile",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/out.bochs",
+		"/C/Users/Gian/Documents/Visual Studio 2013/Projects/kernel/kernel/bochs.out",
+		"/G/BOOT.CAT",
+		"/E/Dropbox/NSEngine/CMakeLists.txt",
+		"/C/Users/Gian/reactos/ntoskrnl/kd/kdinit.c",
+		"/C/Users/Gian/reactos/ntoskrnl/kd/kdmain.c",
+		"/E/Dropbox/NSEngine/set-build-number.bat",
+		"/E/Dropbox/NSEngine/NSEngine/src/Graphics.cpp",
+		"/E/Dropbox/PonyTerra/CMakeLists.txt",
+		"/E/Dropbox/NSEngine/NSEngine/src/Version.h",
+		"/E/Dropbox/PonyTerra/PonyTerra/CMakeLists.txt",
+		"/E/Dropbox/PonyTerra/PonyTerra/src/Console.cpp",
+		"/E/Dropbox/PonyTerra/PonyTerra/src/Component_PlayerInput.cpp",
+		"/E/Dropbox/PonyTerra/PonyTerra/src/Component_Physical.cpp",
+		"/E/Dropbox/NSEngine/CRTDebug/Heap.c",
+		"/E/SteamLibrary/SteamApps/common/Team Fortress 2/tf/cfg/autoexec.cfg",
+		"/E/SteamLibrary/SteamApps/common/Team Fortress 2/tf/cfg/replay_example.cfg",
+		"/E/SteamLibrary/SteamApps/common/Team Fortress 2/tf/cfg/highframes",
+		"/E/Dropbox/NSEngine/NSEngine/src/VersionNumber.h",
+		"/E/Dropbox/YoloNigger/YoloNigger/MainWindow.xaml.cs",
+		"/E/Dropbox/NSEngine/NSEngine/src/version.rc",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/kernel/serial.c",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/kernel/keyboard.s",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/kernel/vsprintf.c",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/lib/wait.c",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/boot/head.s",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/kernel/system_call.s",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/mm/memory.c",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/init/main.c",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/kernel/mktime.c",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/kernel/console.c",
+		"/C/Users/Gian/Documents/Twirraria/config.dat",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/kernel/Makefile",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/kernel/hd.c",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/kernel/asm.s",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/include/string.h",
+		"/C/Users/Gian/Downloads/linux-0.01.tar/linux-0.01/linux/include/a.out.h"
+	],
+	"find":
+	{
+		"height": 103.0
+	},
+	"find_in_files":
+	{
+		"height": 0.0,
+		"where_history":
+		[
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"initrd_root",
+			"initrd_dev",
+			"initrd_root",
+			"DPRINT",
+			"move_stack",
+			"SWITCHING TASK NOW",
+			"tables_physical",
+			"tables_phys",
+			"xchg",
+			"kmalloc_ap",
+			"clone_directory",
+			"clone_dire",
+			"move_stack",
+			"switch_page",
+			"kmalloc",
+			"new_pid",
+			"0xFFFFF000",
+			"tables",
+			"clone_table",
+			"physical_addr",
+			"physical_Addr",
+			"phys_Addr",
+			"physical_addr",
+			"physical_Addr",
+			"physica_addr",
+			");\n",
+			"idt_init_descriptor",
+			"tab_size",
+			"reset",
+			"page",
+			"termina",
+			"qualifier",
+			"iopl",
+			"KiDisplayBlueScreen",
+			"seh2",
+			"release",
+			"Release",
+			"scriptdev",
+			"HEAD",
+			"\"s\"",
+			"=\"s\"",
+			"s",
+			"grunt",
+			"servant_grunt",
+			"grunt_bath",
+			"LoadDebugMenu",
+			"ShowPreMenu",
+			"OutputPath",
+			"h",
+			"ddebug",
+			"debug",
+			"ddebug",
+			"64",
+			"NetMessage.SendData",
+			".status",
+			"void ListenForClients",
+			"void ServerLoop",
+			"ServerLoop",
+			"Thread",
+			"void DedServ",
+			"DedServ",
+			"startDed",
+			"DedServ",
+			"void DedServ",
+			"setWalk",
+			"int cNPC",
+			"TestUserForAdmin",
+			"HAL_"
+		],
+		"highlight": false,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+			"idt_set_gate",
+			""
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": false
+	},
+	"groups":
+	[
+		{
+			"selected": 1,
+			"sheets":
+			[
+				{
+					"buffer": 0,
+					"file": "initrd.c",
+					"settings":
+					{
+						"buffer_size": 5296,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								2284,
+								2284
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 1982.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 1,
+					"file": "main.c",
+					"settings":
+					{
+						"buffer_size": 2604,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								2028,
+								2028
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 960.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 2,
+					"file": "kernel.c",
+					"settings":
+					{
+						"buffer_size": 2881,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								922,
+								922
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 600.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 3,
+					"file": "vfs.c",
+					"settings":
+					{
+						"buffer_size": 1346,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								201,
+								201
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 600.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 4,
+					"file": "/E/Dropbox/Projects/GianOS/include/vfs.h",
+					"settings":
+					{
+						"buffer_size": 1962,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								94,
+								106
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C++.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 5,
+					"file": "/E/Dropbox/Projects/GianOS/drivers/keyboard.c",
+					"settings":
+					{
+						"buffer_size": 2998,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								2612,
+								2612
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 2100.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 6,
+					"file": "kmalloc.c",
+					"settings":
+					{
+						"buffer_size": 5708,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								626,
+								626
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 120.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 7,
+					"file": "task.c",
+					"settings":
+					{
+						"buffer_size": 9614,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								2705,
+								2705
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 2053.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 8,
+					"file": "/E/Dropbox/Projects/GianOS/serial_com1.txt",
+					"settings":
+					{
+						"buffer_size": 1116,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								756,
+								756
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 360.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				}
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 36.0
+	},
+	"input":
+	{
+		"height": 0.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.exec":
+	{
+		"height": 130.0
+	},
+	"replace":
+	{
+		"height": 66.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"show_minimap": true,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 150.0,
+	"status_bar_visible": true
+}

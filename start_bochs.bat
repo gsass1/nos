@@ -1,0 +1,1 @@
+"C:\Program Files (x86)\Bochs-2.6.6\bochs.exe" -f bochsrc.txt -q

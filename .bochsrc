@@ -1,0 +1,6 @@
+megs: 256
+ata0-master: type=cdrom, path=gianos.iso, status=inserted
+com1: enabled=1, mode=file, dev=serial_com1.txt
+mouse: enabled=0
+boot: cdrom
+magic_break: enabled=1

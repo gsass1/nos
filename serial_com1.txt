@@ -1,0 +1,87 @@
+Serial is enabled
+initrd_locaton: 0x00118000
+initrd_end: 0x0011a800
+Initial ESP: 0x0010da12
+Kernel base: 0x00100000
+Kernel end: 0x0010da12
+GianOS is booting...
+[GDT ]: Initializing GDT
+[IDT ]: Initializing IDT
+[PIC ]: Initializing PIC
+[PIT ]: Initializing PIT
+[HEAP]: Initializing Heap
+[HEAP]: Heap: 0x0011d000 - 0x00375000
+[HEAP]: Heap size: 2457600 bytes
+[PAGE]: Initializing Paging
+[KBRD]: Initializing PS/2 Keyboard
+[INRD]: Initializing initrd
+[INRD]: Start address: 0x00118000
+[INRD]: Parsing tar file
+[INRD]: Address: 0x08118000
+[INRD]: Address: 0x08119600
+[INRD]: Tar header has no filename!
+[INRD]: Done parsing tar file, files: 1
+[INRD]: initrd_root: 0x0012500c
+[INRD]: Added file: symtable, inode: 0
+Sym: failed to init!
+[TASK]: Initializing Tasking
+[TASK]: Moving stack
+[TASK]: New stack start: 0xe0000000
+[TASK]: Size: 8192
+[TASK]: Created kernel_task
+Welcome to GianOS!
+Entering debug kernel shell
+
+GianOS: cls
+
+GianOS: ls
+dev     (directory)
+symtable     (file)
+
+GianOS: help
+help - Display this
+
+GianOS: ls
+dev     (directory)
+symtable     (file)
+
+GianOS: cls
+
+GianOS: lsclsclas
+Unknown command
+
+GianOS: dl
+Unknown command
+
+GianOS: cl
+Unknown command
+
+GianOS: sl
+Unknown command
+
+GianOS: cls
+
+GianOS: cls
+
+GianOS: cls
+
+GianOS: cls
+
+GianOS: cls
+
+GianOS: cls
+
+GianOS: cls
+
+GianOS: cls
+
+GianOS: cls
+
+GianOS: ls
+dev     (directory)
+symtable     (file)
+
+GianOS: cd
+Unknown command
+
+GianOS: 

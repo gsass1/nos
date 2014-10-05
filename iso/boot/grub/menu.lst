@@ -1,0 +1,6 @@
+default 0
+timeout 0
+title GianOS
+kernel /kernel.elf
+module /initrd.tar
+boot
