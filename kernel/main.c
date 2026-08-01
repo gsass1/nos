@@ -1,3 +1,4 @@
+#include <ata.h>
 #include <elf.h>
 #include <fb.h>
 #include <gdt.h>
@@ -94,6 +95,12 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
                         ? (0x100000 + mbootptr->mem_upper * 1024)
                         : 0x1000000;
     mm_paging_init(mem_size);
+
+    // Discover legacy ATA disks through polling PIO. The block layer is
+    // available to kernel subsystems, but the initrd remains the root FS.
+    ata_init();
+    ata_test((mbootptr->flags & (1U << 2))
+             ? (const char *)mbootptr->cmdline : 0);
 
 	// PS/2 keyboard and mouse initalization
     kbd_init();

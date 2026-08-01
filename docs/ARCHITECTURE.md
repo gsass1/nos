@@ -44,7 +44,8 @@ flowchart TB
         mm["Paging + frames<br/>(paging.c)"]
         heap["Heap / kmalloc<br/>(kmalloc.c)"]
         vfs["VFS + initrd<br/>(vfs.c, initrd.c)"]
-        drv["Drivers<br/>VGA / kbd / serial / PIT"]
+        drv["Drivers<br/>VGA / kbd / serial / PIT / ATA"]
+        block["Block devices<br/>(block.c)"]
         cpu["CPU setup<br/>GDT / IDT / PIC"]
     end
     sh -- "int 0x80" --> sys
@@ -53,6 +54,7 @@ flowchart TB
     sys --> elf
     sys --> vfs
     sys --> drv
+    block --> drv
     elf --> mm
     task --> mm
     mm --> heap
@@ -97,8 +99,9 @@ flowchart TD
     D --> E["gdt_init, idt_init,<br/>pic_init, pit_init(200 Hz)"]
     E --> F["sti (interrupts on)"]
     F --> G["heap_init<br/>mm_paging_init(mem_size)"]
-    G --> H["kbd_init"]
-    H --> I["initrd_init -> fs_root<br/>sym_init"]
+    G --> H["ata_init<br/>IDENTIFY disks"]
+    H --> H2["kbd_init"]
+    H2 --> I["initrd_init -> fs_root<br/>sym_init"]
     I --> J["syscall_init<br/>(int 0x80 gate)"]
     J --> K["tasking_init<br/>(kernel_task adopts boot stack)"]
     K --> L["elf_exec('sh')<br/>load + run the shell"]
@@ -434,9 +437,16 @@ in memory. The initrd currently holds `symtable`, `hello`, and `sh`.
 | Keyboard| `drivers/keyboard.c`| PS/2; IRQ1 → scancode → ASCII into a bounded ring buffer; `kbd_getc` drains it |
 | Serial  | `drivers/serial.c`  | COM1; mirrors console output (used for logging/tests) |
 | PIT     | `kernel/pit.c`      | 200 Hz timer; IRQ0 drives the scheduler |
+| ATA     | `drivers/ata.c`     | Legacy primary/secondary PIO; IDENTIFY plus bounded polling LBA28 reads, writes, and cache flush |
 
 `kprintf` writes to both VGA and serial (guarded by a mutex); `mprintf` prefixes
 a module tag; `panic` prints a message and a symbolic stack trace, then halts.
+
+`kernel/block.c` keeps a small registry of discovered 512-byte-sector devices
+and validates every request against the device capacity before dispatching it.
+ATA channels are mutex-serialized, and device interrupts stay disabled because
+this first storage path uses bounded polling. The initrd remains the root
+filesystem; no raw disk interface is exposed to ring 3.
 
 ---
 
@@ -465,6 +475,7 @@ a module tag; `panic` prints a message and a symbolic stack trace, then halts.
 | `kernel/idt.c` | Interrupt descriptor table |
 | `kernel/pic.c` | 8259 PIC remap |
 | `kernel/pit.c` | Timer (200 Hz) |
+| `kernel/block.c`, `drivers/ata.c` | Block-device registry and polling ATA PIO |
 | `kernel/interrupt.S` | ISR stubs, `SAVE/RESTORE_REGS`, `task_switch`, `_asm_syscall` |
 | `kernel/isr.c` | C exception/IRQ handlers |
 | `kernel/paging.c` | Frame allocator, page tables, `clone/free_directory` |
