@@ -23,3 +23,6 @@ tests/wm5.ppm
 tests/wm6.ppm
 tests/wm7.ppm
 tests/wm8.ppm
+
+iso/initrd.tar
+initrd/
