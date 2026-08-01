@@ -44,13 +44,28 @@ static int match(const char *re, const char *text)
     return 0;
 }
 
-static void grep(int fd, const char *pattern)
+static int grep(int fd, const char *pattern)
 {
-    char buf[BUFSZ];
+    char *buf = sbrk(BUFSZ);
+    if (buf == (char *)-1) {
+        return -1;
+    }
+    int capacity = BUFSZ;
     int used = 0;
     int n;
 
-    while ((n = read(fd, buf + used, sizeof(buf) - used - 1)) > 0) {
+    for (;;) {
+        if (used == capacity - 1) {
+            char *more = sbrk(BUFSZ);
+            if (more == (char *)-1 || more != buf + capacity) {
+                return -1;
+            }
+            capacity += BUFSZ;
+        }
+        n = read(fd, buf + used, capacity - used - 1);
+        if (n <= 0) {
+            break;
+        }
         used += n;
         buf[used] = '\0';
 
@@ -74,9 +89,6 @@ static void grep(int fd, const char *pattern)
                 buf[i] = buf[start + i];
             }
         }
-        if (used == (int)sizeof(buf) - 1) {
-            used = 0;
-        }
     }
 
     if (used) {
@@ -85,6 +97,7 @@ static void grep(int fd, const char *pattern)
             write(1, buf, used);
         }
     }
+    return n;
 }
 
 void _start(int argc, char **argv)
@@ -94,8 +107,7 @@ void _start(int argc, char **argv)
         exit(1);
     }
     if (argc == 2) {
-        grep(0, argv[1]);
-        exit(0);
+        exit(grep(0, argv[1]) < 0);
     }
 
     for (int i = 2; i < argc; i++) {
@@ -106,7 +118,11 @@ void _start(int argc, char **argv)
             put("\n");
             exit(1);
         }
-        grep(fd, argv[1]);
+        if (grep(fd, argv[1]) < 0) {
+            put("grep: read or memory error\n");
+            close(fd);
+            exit(1);
+        }
         close(fd);
     }
     exit(0);

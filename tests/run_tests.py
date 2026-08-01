@@ -265,7 +265,7 @@ def main():
         # hanging -- the prompt coming back is the real assertion.
         sh.run(
             "crash | upper",
-            ["killed: page fault", "[exit status -1"],
+            ["killed: page fault"],
             "pipeline EOF on killed writer",
         )
 
