@@ -63,7 +63,7 @@ void vga_putc(char c)
 {
 	if(c == '\n') {
 		vga_row++;
-		if(vga_row == VGA_HEIGHT) {
+		if(vga_row >= VGA_HEIGHT) {
 			vga_scroll();
 		}
 		vga_col = 0;
@@ -85,10 +85,17 @@ void vga_putc(char c)
 
 	vga_putc_at(c, vga_current_color, vga_col, vga_row);
 
-	if(vga_col++ >= VGA_WIDTH) {
-        vga_col = 0;
-		if(vga_row++ >= VGA_HEIGHT) {
-            vga_row = 0;
+	// Wrap at the right edge; scroll (don't run off-screen) at the bottom.
+	// The old post-increment version let a wrapping line on the last row push
+	// vga_row past VGA_HEIGHT without scrolling, after which ALL output landed
+	// in invisible off-screen VGA memory: the first >80-column line (e.g. a
+	// page-fault kill report) appeared to freeze the console for good.
+	vga_col++;
+	if(vga_col == VGA_WIDTH) {
+		vga_col = 0;
+		vga_row++;
+		if(vga_row >= VGA_HEIGHT) {
+			vga_scroll();
 		}
 	}
 	vga_set_cursor(vga_col, vga_row);

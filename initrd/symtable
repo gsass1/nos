@@ -176,11 +176,11 @@
 00104862 T vga_print
 001048ac T vga_putc_at
 001048ee T vga_putc
-00104a1d T vga_set_cursor
-00104a8c T vga_scroll
-00104b11 t skip_atoi
-00104b6a t number
-00104d8b T vsprintf
+00104a22 T vga_set_cursor
+00104a91 T vga_scroll
+00104b16 t skip_atoi
+00104b6f t number
+00104d90 T vsprintf
 00107000 d __module_name
 00107004 d _qwertzuiop
 00107008 d _asdfghjkl
