@@ -52,16 +52,18 @@ static int sys_getc(void)
     return (unsigned char)c;
 }
 
-static int sys_readdir(uint32_t index, char *name_out)
+static int sys_readdir(uint32_t index, char *name_out, uint32_t len)
 {
-    if (!name_out) {
+    if (!name_out || len == 0) {
         return -1;
     }
     struct dirent *node = vfs_readdir(fs_root, index);
     if (!node) {
         return -1;
     }
-    strcpy(name_out, node->name);
+    // Never write past the caller's buffer; truncate and always NUL-terminate.
+    strncpy(name_out, node->name, len - 1);
+    name_out[len - 1] = '\0';
     return 0;
 }
 
@@ -88,7 +90,7 @@ void syscall_dispatch(struct regs *r)
         r->eax = (uint32_t)sys_getc();
         break;
     case SYS_READDIR:
-        r->eax = (uint32_t)sys_readdir(r->ebx, (char *)r->ecx);
+        r->eax = (uint32_t)sys_readdir(r->ebx, (char *)r->ecx, r->edx);
         break;
     case SYS_CLEAR:
         vga_clear();

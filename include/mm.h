@@ -30,7 +30,10 @@ extern struct page_directory *current_directory;
 
 void alloc_frame(struct page *page, int is_kernel, int is_writeable);
 
-void heap_init(void);
+// reserved_end: first byte past bootloader-placed data (kernel image, initrd
+// module) that the heap must not overlap. The heap starts page-aligned above
+// max(kernel_end, reserved_end).
+void heap_init(uint32_t reserved_end);
 
 // mem_size is the total physical memory in bytes (sizes the frame allocator).
 void mm_paging_init(uint32_t mem_size);

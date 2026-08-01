@@ -58,16 +58,17 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	vga_init();
 	serial_init();
 
-	// initrd should be the only module
+	// initrd should be the only module. Check mods_count before touching
+	// mods_addr -- with no module loaded, mods_addr is garbage.
+    if(mbootptr->mods_count == 0) {
+        panic("Can't find initrd\n");
+    }
+
     uint32_t initrd_location = *((uint32_t*)mbootptr->mods_addr);
     uint32_t initrd_end = *(uint32_t*)(mbootptr->mods_addr + 4);
 
     DPRINT("initrd_locaton: 0x%08x\n", initrd_location);
     DPRINT("initrd_end: 0x%08x\n", initrd_end);
-
-    if(mbootptr->mods_count == 0) {
-        panic("Can't find initrd\n");
-    }
 
 	kprintf("NOS is booting...\n");
 
@@ -81,9 +82,12 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	// We can enable interrupts now
     asm volatile("sti");
 
-	// Memory initialization. Total RAM comes from the multiboot mem_upper field
-	// (KB above 1MB); fall back to 16MB if the bootloader didn't provide it.
-    heap_init();
+	// Memory initialization. The heap is placed after the initrd module (the
+	// bootloader puts it right behind the kernel image); the old fixed pad
+	// zeroed the initrd's tail once the archive outgrew it. Total RAM comes
+	// from the multiboot mem_upper field (KB above 1MB); fall back to 16MB if
+	// the bootloader didn't provide it.
+    heap_init(initrd_end);
     uint32_t mem_size = (mbootptr->flags & 0x1)
                         ? (0x100000 + mbootptr->mem_upper * 1024)
                         : 0x1000000;

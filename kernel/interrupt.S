@@ -38,11 +38,14 @@ _asm_reserved_int:
     RESTORE_REGS
     iret
 
+# Only vectors 8 (#DF), 10-14 (#TS/#NP/#SS/#GP/#PF) and 17 (#AC) push an error
+# code; their stubs pop it with `add esp,4` before iret. The other exception
+# stubs must NOT do that -- it would discard the return eip and iret into
+# garbage if their handler ever returned.
 _asm_exc_DIV0:
     SAVE_REGS
     call isr_exc_DIV0
     RESTORE_REGS
-    add esp,4
     iret
 
 _asm_exc_DEBUG:
@@ -56,21 +59,18 @@ _asm_exc_BP:
     SAVE_REGS
     call isr_exc_BP
     RESTORE_REGS
-    add esp,4
     iret
 
 _asm_exc_NOMATH:
     SAVE_REGS
     call isr_exc_NOMATH
     RESTORE_REGS
-    add esp,4
     iret
 
 _asm_exc_MF:
     SAVE_REGS
     call isr_exc_MF
     RESTORE_REGS
-    add esp,4
     iret
 
 _asm_exc_TSS:
@@ -98,42 +98,36 @@ _asm_exc_MC:
     SAVE_REGS
     call isr_exc_MC
     RESTORE_REGS
-    add esp,4
     iret
 
 _asm_exc_XM:
     SAVE_REGS
     call isr_exc_XM
     RESTORE_REGS
-    add esp,4
     iret
 
 _asm_exc_NMI:
     SAVE_REGS
     call isr_exc_NMI
     RESTORE_REGS
-    add esp,4
     iret
 
 _asm_exc_OVRFLW:
     SAVE_REGS
     call isr_exc_OVRFLW
     RESTORE_REGS
-    add esp,4
     iret
 
 _asm_exc_BOUNDS:
     SAVE_REGS
     call isr_exc_BOUNDS
     RESTORE_REGS
-    add esp,4
     iret
 
 _asm_exc_OPCODE:
     SAVE_REGS
     call isr_exc_OPCODE
     RESTORE_REGS
-    add esp,4
     iret
 
 

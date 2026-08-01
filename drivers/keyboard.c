@@ -102,7 +102,9 @@ static uint8_t to_ascii(uint8_t key)
     if(key == ZERO_PRESSED) return '0';
     if(key >= ONE_PRESSED && key <= NINE_PRESSED)
         return _num[key - ONE_PRESSED];
-    if(key >= 0x10 && key <= 0x1C)
+    // 0x10-0x19 is q..p. 0x1A/0x1B ('['/']') are NOT in the string; including
+    // them read past "qwertzuiop" into the neighbouring rodata literal.
+    if(key >= 0x10 && key <= 0x19)
     {
         return _qwertzuiop[key - 0x10];
     }

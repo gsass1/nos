@@ -44,6 +44,33 @@ int elf_exec(const char *path)
         return -1;
     }
 
+    // Sanity-check the headers before touching any address space: the program
+    // header table must lie inside the file, every PT_LOAD's file data must
+    // too, and segments may only target the user region -- otherwise a
+    // truncated or malicious binary reads past the buffer or memcpy()s over
+    // kernel memory (alloc_frame silently keeps existing kernel mappings).
+    if (eh->e_phoff > got ||
+        (uint32_t)eh->e_phnum * eh->e_phentsize > got - eh->e_phoff) {
+        mprintf(LOGLEVEL_DEFAULT, "elf_exec: '%s' program headers out of bounds\n", kpath);
+        kfree(buf);
+        return -1;
+    }
+    for (uint32_t i = 0; i < eh->e_phnum; i++) {
+        struct elf32_phdr *ph =
+            (struct elf32_phdr *)(buf + eh->e_phoff + i * eh->e_phentsize);
+        if (ph->p_type != PT_LOAD) {
+            continue;
+        }
+        if (ph->p_offset > got || ph->p_filesz > got - ph->p_offset ||
+            ph->p_filesz > ph->p_memsz ||
+            ph->p_vaddr < USER_VADDR_MIN ||
+            ph->p_memsz > USER_VADDR_MAX - ph->p_vaddr) {
+            mprintf(LOGLEVEL_DEFAULT, "elf_exec: '%s' has a bad PT_LOAD segment\n", kpath);
+            kfree(buf);
+            return -1;
+        }
+    }
+
     // Give the program its own address space. Cloning the kernel directory
     // shares every kernel/heap mapping (so the task's kernel stack, the heap,
     // and this loader all stay reachable) while leaving the user region empty,

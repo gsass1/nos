@@ -82,16 +82,19 @@ void idt_init(void)
     idt_set_gate(12, (uint32_t) _asm_exc_STACKF, 0x8, 0x8E); // #Stack Fault (stack operation and ss load)
     idt_set_gate(13, (uint32_t) _asm_exc_GP, 0x8, 0x8E);    // #Global Protection Fault
     idt_set_gate(14, (uint32_t) _asm_exc_PF, 0x8, 0x8E); // #Page Fault
-    idt_set_gate(15, (uint32_t) _asm_exc_MF, 0x8, 0x8E); // #Math fault (floating point)
-    idt_set_gate(16, (uint32_t) _asm_exc_AC, 0x8, 0x8E); // #Alignment check
-    idt_set_gate(17, (uint32_t) _asm_exc_MC, 0x8, 0x8E); // #Machine check
-    idt_set_gate(18, (uint32_t) _asm_exc_XM, 0x8, 0x8E); // #SIMD floating-point exception
+    // Vector 15 is reserved; the real layout is 16=#MF, 17=#AC, 18=#MC, 19=#XM
+    // (the old table had these shifted down one).
+    idt_set_gate(16, (uint32_t) _asm_exc_MF, 0x8, 0x8E); // #Math fault (floating point)
+    idt_set_gate(17, (uint32_t) _asm_exc_AC, 0x8, 0x8E); // #Alignment check (pushes an error code)
+    idt_set_gate(18, (uint32_t) _asm_exc_MC, 0x8, 0x8E); // #Machine check
+    idt_set_gate(19, (uint32_t) _asm_exc_XM, 0x8, 0x8E); // #SIMD floating-point exception
 
     idt_set_gate(32, (uint32_t) _asm_irq_0, 0x08, 0x8E);
     idt_set_gate(33, (uint32_t) _asm_irq_1, 0x08, 0x8E);
-    idt_set_gate(40, (uint32_t) _asm_irq_7, 0x08, 0x8E);
+    // Spurious IRQ7 arrives on vector 32+7=39 (gate 40 would be IRQ8).
+    idt_set_gate(39, (uint32_t) _asm_irq_7, 0x08, 0x8E);
 
-    asm volatile("lidtl %0": "=m" (idt_ptr));
+    asm volatile("lidt %0" : : "m"(idt_ptr));
 }
 
 void idt_install_handler(uint8_t num, uint32_t base)

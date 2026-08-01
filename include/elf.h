@@ -35,6 +35,11 @@ struct elf32_phdr
 
 #define PT_LOAD 1
 
+// The virtual address window user program segments may occupy. Programs link
+// at 1GB (user/user.ld); everything below is kernel identity-mapped memory.
+#define USER_VADDR_MIN 0x40000000U
+#define USER_VADDR_MAX 0x80000000U
+
 // Load an ELF32 program from the initrd, mapping its PT_LOAD segments, and
 // start it as a task. Returns the new task id, or -1 on failure.
 int elf_exec(const char *path);

@@ -47,7 +47,7 @@ static void cmd_ls(void)
 {
     char name[128];
     int i = 0;
-    while (sys3(SYS_READDIR, i, (int)name, 0) == 0) {
+    while (sys3(SYS_READDIR, i, (int)name, sizeof(name)) == 0) {
         put(name);
         put("\n");
         i++;

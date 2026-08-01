@@ -48,7 +48,10 @@ void pic_init(void)
     outb(0x21, ICW4_8086);
     outb(0xA1, ICW4_8086);
 
-    // Mask interrupts
-    outb(0x21, 0);
-    outb(0xA1, 0);
+    // Mask everything except IRQ0 (timer) and IRQ1 (keyboard). We have no
+    // handlers (or slave EOI) for anything else; with all lines unmasked a
+    // single slave interrupt (e.g. IRQ12 from the PS/2 mouse) would never be
+    // acknowledged and wedge the slave PIC permanently.
+    outb(0x21, 0xFC);
+    outb(0xA1, 0xFF);
 }

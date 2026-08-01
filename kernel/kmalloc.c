@@ -21,11 +21,34 @@ uint32_t heap_end;
 #define PAGE_ALIGNED(a) (!(((uint32_t)(a)) & 0xFFF))
 #define PAGE_ALIGN(a) (a) &= 0xFFFFF000; (a) += 0x1000;
 
-void heap_init(void)
+// The heap walk mutates block headers non-atomically, and callers allocate
+// with interrupts enabled (e.g. elf_exec) while the scheduler can preempt into
+// another allocating/freeing task. Mask interrupts around every walk; single
+// CPU, so that is sufficient. IF is restored to exactly what the caller had.
+static inline uint32_t irq_save(void)
+{
+    uint32_t flags;
+    asm volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
+    return flags;
+}
+
+static inline void irq_restore(uint32_t flags)
+{
+    asm volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
+}
+
+// `reserved_end` is the first byte past memory the heap must not touch --
+// in practice the end of the initrd module, which the bootloader places right
+// after the kernel image. The old fixed kernel_end+0xF000 pad silently zeroed
+// the initrd's tail as soon as the archive outgrew 60KB.
+void heap_init(uint32_t reserved_end)
 {
     mprintf(LOGLEVEL_DEFAULT, "Initializing Heap\n");
-    heap = (uint32_t)&kernel_end + 0xF000;
-    if(heap & 0xFFFFF000) {
+    heap = (uint32_t)&kernel_end;
+    if(reserved_end > heap) {
+        heap = reserved_end;
+    }
+    if(heap & 0xFFF) {
         heap &= 0xFFFFF000;
         heap += 0x1000;
     }
@@ -44,6 +67,7 @@ void *kmalloc(uint32_t size)
     // last block" walk drifts past heap_end, corrupting the free list.
     size = (size + sizeof(struct alloc) - 1) & ~(sizeof(struct alloc) - 1);
 
+    uint32_t flags = irq_save();
     uint32_t mem = heap;
     struct alloc *alloc;
     while(mem < heap_end) {
@@ -58,12 +82,14 @@ void *kmalloc(uint32_t size)
             if(alloc->size >= size) {
                 // We can use it!
                 alloc->status = 1;
+                irq_restore(flags);
                 return HEAD_TO_POINTER(alloc);
             } else if(alloc->size == 0) {
                 // This is the last block, it has no size!
                 alloc->size = size;
                 alloc->status = 1;
-                return HEAD_TO_POINTER(alloc);         
+                irq_restore(flags);
+                return HEAD_TO_POINTER(alloc);
             } else {
                 // Not enough space
                 goto to_next_block;
@@ -84,8 +110,10 @@ void kfree(void *ptr)
     if(!ptr) {
         return;
     }
+    uint32_t flags = irq_save();
     struct alloc *alloc = POINTER_TO_HEAD(ptr);
     alloc->status = 0;
+    irq_restore(flags);
 }
 
 void *kmalloc_a(uint32_t size)
@@ -93,6 +121,7 @@ void *kmalloc_a(uint32_t size)
     // Keep block boundaries on the header-size grid (see kmalloc).
     size = (size + sizeof(struct alloc) - 1) & ~(sizeof(struct alloc) - 1);
 
+    uint32_t flags = irq_save();
     uint32_t mem = heap;
     struct alloc *alloc;
     while(mem < heap_end) {
@@ -108,6 +137,7 @@ void *kmalloc_a(uint32_t size)
                 // We can use it, check align.
                 if(PAGE_ALIGNED(HEAD_TO_POINTER(alloc))) {
                     alloc->status = 1;
+                    irq_restore(flags);
                     return HEAD_TO_POINTER(alloc);
                 } else {
                     // goddamnit, its not page aligned :c
@@ -119,6 +149,7 @@ void *kmalloc_a(uint32_t size)
                 if(PAGE_ALIGNED(HEAD_TO_POINTER(alloc))) {
                     alloc->status = 1;
                     alloc->size = size;
+                    irq_restore(flags);
                     return HEAD_TO_POINTER(alloc);
                 } else {
                     // It's not page aligned, but we can make it page aligned
@@ -139,6 +170,7 @@ void *kmalloc_a(uint32_t size)
                         alloc = (struct alloc *)(addr - sizeof(struct alloc));
                         alloc->size = size;
                         alloc->status = 1;
+                        irq_restore(flags);
                         return HEAD_TO_POINTER(alloc);
                     } else {
                         // Dang it, now we need to skip 4096 bytes + offset to get the next page aligned address
@@ -152,6 +184,7 @@ void *kmalloc_a(uint32_t size)
                         alloc = (struct alloc *)((addr + 0x1000) - sizeof(struct alloc));
                         alloc->size = size;
                         alloc->status = 1;
+                        irq_restore(flags);
                         return HEAD_TO_POINTER(alloc);
                     }
                 }
