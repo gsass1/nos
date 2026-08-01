@@ -32,6 +32,7 @@ typedef struct fs_node *(*finddir_fsnode_t)(struct fs_node *, char *);
 struct fs_ops
 {
     struct fs_node *(*create)(struct fs_node *dir, const char *name);
+    int (*mkdir)(struct fs_node *dir, const char *name);
     int (*truncate)(struct fs_node *node);
 };
 
@@ -75,5 +76,9 @@ struct fs_node *vfs_create(struct fs_node *dir, const char *name);
 // Truncate a file node to zero length (free all data blocks).
 // Returns 0 on success, -1 on failure (e.g. unsupported indirect pointers).
 int vfs_truncate(struct fs_node *node);
+
+// Create a directory named `name` in directory `dir`. Returns 0 on success,
+// -1 if the directory does not support mkdir or the operation fails.
+int vfs_mkdir(struct fs_node *dir, const char *name);
 
 #endif

@@ -20,7 +20,7 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr initrd/disktest
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr initrd/disktest initrd/mkdir
 OBJ=boot/boot.o \
 	drivers/keyboard.o \
 	drivers/mouse.o \
@@ -220,11 +220,15 @@ initrd/disktest: user/disktest.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/disktest.c -o user/disktest.o $(CFLAGS)
 	$(LD) -T user/user.ld user/disktest.o -o initrd/disktest
 
+initrd/mkdir: user/mkdir.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/mkdir.c -o user/mkdir.o $(CFLAGS)
+	$(LD) -T user/user.ld user/mkdir.o -o initrd/mkdir
+
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr disktest
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr disktest mkdir
 
 initrd: $(INITRD)
 

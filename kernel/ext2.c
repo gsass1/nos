@@ -8,7 +8,7 @@
 // take the lock so a concurrent writer cannot race the block cache.
 //
 // Intentional limitations: 1 KiB blocks, one block group, revision 0, no
-// incompatible or read-only-compatible features. No unlink, mkdir, symlinks,
+// incompatible or read-only-compatible features. No unlink, rmdir, symlinks,
 // multi-group writes, or journaling.
 #include <block.h>
 #include <ext2.h>
@@ -160,6 +160,7 @@ static uint32_t ext2_read_file(struct fs_node *node, uint32_t offset,
 static uint32_t ext2_write_file(struct fs_node *node, uint32_t offset,
                                 uint32_t size, uint8_t *buffer);
 static struct fs_node *ext2_create(struct fs_node *dir, const char *name);
+static int ext2_mkdir(struct fs_node *dir, const char *name);
 static int ext2_truncate(struct fs_node *node);
 
 // --- Block range validation -------------------------------------------------
@@ -1006,6 +1007,187 @@ static struct fs_node *ext2_create(struct fs_node *dir, const char *name)
     return fn;
 }
 
+// Create a directory named `name` in the directory inode behind `dir`.
+// Allocates one inode and one data block, initializes `.` and `..` records,
+// bumps the parent's link count and the group's used-dirs count, and finally
+// inserts the child entry into the parent. Returns 0 on success, -1 on
+// failure.
+//
+// Resource ordering: inode is allocated first, then the data block, then the
+// directory block and child inode are initialized. After the child inode is
+// persisted, the fallible parent-side count updates happen before the
+// directory entry is added: the parent link count is incremented and
+// persisted, then bg_used_dirs_count is incremented and persisted. Only then
+// is the child entry inserted via ext2_dir_add. If any of these steps fails,
+// the count values are restored to their saved originals and the child
+// inode/block are freed — so a failed mkdir never leaves a partially
+// initialized child, a dangling parent entry, or stale count metadata.
+static int ext2_mkdir(struct fs_node *dir, const char *name)
+{
+    struct ext2_mount *m = dir->ptr;
+    mutex_lock(&m->lock);
+
+    // Validate the parent is a directory.
+    struct ext2_inode din;
+    if (ext2_read_inode(m, dir->inode, &din) < 0) {
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+    if (!ext2_inode_pointers_ok(m, &din)) {
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+    if ((din.i_mode & EXT2_S_IFMT) != EXT2_S_IFDIR) {
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Validate the name.
+    uint32_t namelen = strlen(name);
+    if (namelen == 0 || namelen > 255) {
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+    // Reject reserved names.
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Reject if the name already exists.
+    if (ext2_dir_lookup(m, &din, name) != 0) {
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Bumping the parent link count must not overflow uint16 (a full or
+    // malformed parent at 0xFFFF would wrap to zero, corrupting the count).
+    if (din.i_links_count == 0xFFFF) {
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Bumping bg_used_dirs_count must not overflow the total inode count
+    // (it can never legitimately exceed s_inodes_count).
+    if (m->gd.bg_used_dirs_count >= m->sb.s_inodes_count) {
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Allocate the new inode (ext2_alloc_inode skips reserved inodes).
+    uint32_t ino = ext2_alloc_inode(m);
+    if (!ino) {
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Allocate one data block for the directory (ext2_alloc_block only
+    // returns validated data blocks and zeroes them).
+    uint32_t blk = ext2_alloc_block(m);
+    if (!blk) {
+        ext2_free_inode(m, ino);
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Build the directory data block: "." and ".." records.
+    uint32_t bs = m->block_size;
+    uint8_t *dbuf = kmalloc(bs);
+    if (!dbuf) {
+        ext2_free_block(m, blk);
+        ext2_free_inode(m, ino);
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+    memset(dbuf, 0, bs);
+
+    // "." entry: 8-byte header + 1-byte name, padded to 12.
+    struct ext2_dirent *dot = (struct ext2_dirent *)dbuf;
+    dot->inode = ino;
+    dot->rec_len = 12;
+    dot->name_len = 1;
+    *((uint8_t *)(dot + 1)) = '.';
+
+    // ".." entry: occupies the rest of the block.
+    struct ext2_dirent *dotdot = (struct ext2_dirent *)(dbuf + 12);
+    dotdot->inode = dir->inode;
+    dotdot->rec_len = bs - 12;
+    dotdot->name_len = 2;
+    *((uint8_t *)(dotdot + 1)) = '.';
+    *((uint8_t *)(dotdot + 1) + 1) = '.';
+
+    if (ext2_write_block(m, blk, dbuf) < 0) {
+        kfree(dbuf);
+        ext2_free_block(m, blk);
+        ext2_free_inode(m, ino);
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+    kfree(dbuf);
+
+    // Initialize the new directory inode: mode 0755, links=2 (self + parent
+    // entry), size = one block, i_blocks = 2 sectors (1 KiB / 512).
+    struct ext2_inode in;
+    memset(&in, 0, sizeof(in));
+    in.i_mode = EXT2_S_IFDIR | 0755;
+    in.i_links_count = 2;
+    in.i_size = bs;
+    in.i_blocks = 2;
+    in.i_block[0] = blk;
+
+    if (ext2_write_inode(m, ino, &in) < 0) {
+        ext2_free_block(m, blk);
+        ext2_free_inode(m, ino);
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Persist the parent link-count increment before adding the directory
+    // entry. Save the old value so it can be restored on a later failure.
+    uint16_t old_parent_links = din.i_links_count;
+    din.i_links_count++;
+    if (ext2_write_inode(m, dir->inode, &din) < 0) {
+        din.i_links_count = old_parent_links;
+        ext2_free_block(m, blk);
+        ext2_free_inode(m, ino);
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Persist the group's used-dirs-count increment. Save the old value so
+    // it can be restored on a later failure.
+    uint16_t old_used_dirs = m->gd.bg_used_dirs_count;
+    m->gd.bg_used_dirs_count++;
+    if (ext2_write_group_desc(m) < 0) {
+        m->gd.bg_used_dirs_count = old_used_dirs;
+        din.i_links_count = old_parent_links;
+        ext2_write_inode(m, dir->inode, &din);
+        ext2_free_block(m, blk);
+        ext2_free_inode(m, ino);
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Insert the child entry into the parent directory — the last fallible
+    // step. If it fails, roll back both count updates and free the child.
+    if (ext2_dir_add(m, dir->inode, &din, ino, name) < 0) {
+        m->gd.bg_used_dirs_count = old_used_dirs;
+        ext2_write_group_desc(m);
+        din.i_links_count = old_parent_links;
+        ext2_write_inode(m, dir->inode, &din);
+        ext2_free_block(m, blk);
+        ext2_free_inode(m, ino);
+        mutex_unlock(&m->lock);
+        return -1;
+    }
+
+    // Cache the new directory's fs_node so subsequent lookups find it.
+    ext2_get_node(m, ino, name, EXT2_S_IFDIR | 0755, bs);
+
+    mutex_unlock(&m->lock);
+    return 0;
+}
+
 // --- Mount validation -------------------------------------------------------
 
 struct fs_node *ext2_mount(struct block_device *dev)
@@ -1182,6 +1364,7 @@ struct fs_node *ext2_mount(struct block_device *dev)
 
     // Initialize the fs_ops tables (once).
     ext2_dir_ops.create = ext2_create;
+    ext2_dir_ops.mkdir = ext2_mkdir;
     ext2_dir_ops.truncate = 0;
     ext2_file_ops.create = 0;
     ext2_file_ops.truncate = ext2_truncate;

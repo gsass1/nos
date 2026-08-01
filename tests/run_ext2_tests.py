@@ -24,7 +24,13 @@ INITRD = os.path.join(REPO, "initrd", "initrd.tar")
 SERIAL_LOG = os.path.join(REPO, "tests", "ext2_serial.log")
 TIMEOUT = 45
 
-KEYMAP = {" ": "spc"}
+KEYMAP = {
+    " ": "spc",
+    "|": "shift-backslash",
+    ">": "shift-dot",
+    "/": "slash",
+    ".": "dot",
+}
 for _c in "abcdefghijklmnopqrstuvwxyz0123456789":
     KEYMAP[_c] = _c
 for _c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
@@ -154,6 +160,90 @@ def boot_and_run(image, command, markers, desc):
         proc.wait()
 
 
+def boot_and_run_seq(image, commands, desc):
+    """Boot NOS with the ext2 image, type multiple shell commands in sequence,
+    waiting for the prompt after each. Returns True if all commands completed
+    without a panic or timeout."""
+    if os.path.exists(SERIAL_LOG):
+        os.remove(SERIAL_LOG)
+
+    proc = subprocess.Popen(
+        [
+            "qemu-system-i386",
+            "-kernel", KERNEL,
+            "-initrd", INITRD,
+            "-serial", "file:" + SERIAL_LOG,
+            "-display", "none",
+            "-monitor", "stdio",
+            "-drive", f"file={image},format=raw,if=ide,index=0,media=disk",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    try:
+        # Wait for the first shell prompt.
+        pos = 0
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                with open(SERIAL_LOG, "r", errors="replace") as f:
+                    data = f.read()
+            except FileNotFoundError:
+                data = ""
+            if "panic:" in data:
+                failures.append(f"{desc}: kernel panic during boot")
+                return False
+            if "nsh$" in data:
+                pos = data.index("nsh$") + 4
+                break
+            if proc.poll() is not None:
+                failures.append(f"{desc}: QEMU exited early")
+                return False
+            time.sleep(0.2)
+        else:
+            failures.append(f"{desc}: no shell prompt")
+            return False
+
+        # Type each command, waiting for the next prompt.
+        for cmd in commands:
+            for ch in cmd:
+                proc.stdin.write("sendkey " + KEYMAP.get(ch, ch) + "\n")
+                proc.stdin.flush()
+                time.sleep(0.06)
+            proc.stdin.write("sendkey ret\n")
+            proc.stdin.flush()
+
+            deadline = time.time() + TIMEOUT
+            while time.time() < deadline:
+                try:
+                    with open(SERIAL_LOG, "r", errors="replace") as f:
+                        data = f.read()
+                except FileNotFoundError:
+                    data = ""
+                if "panic:" in data:
+                    failures.append(f"{desc}: kernel panic during '{cmd}'")
+                    return False
+                idx = data.find("nsh$", pos)
+                if idx != -1:
+                    pos = idx + 4
+                    break
+                if proc.poll() is not None:
+                    failures.append(f"{desc}: QEMU exited during '{cmd}'")
+                    return False
+                time.sleep(0.2)
+            else:
+                failures.append(f"{desc}: no prompt after '{cmd}'")
+                return False
+
+        return True
+    finally:
+        proc.kill()
+        proc.wait()
+
+
 def run_e2fsck(image, desc):
     """Run e2fsck -fn (read-only, force) and check for a clean result."""
     r = subprocess.run(
@@ -185,6 +275,58 @@ def run_debugfs_cat(image, path, expected, desc):
         )
         return False
     return True
+
+
+def run_debugfs_ls(image, path, expected_entry, desc):
+    """Use debugfs to list a directory and verify an entry is present."""
+    r = subprocess.run(
+        ["debugfs", "-R", f"ls {path}", image],
+        capture_output=True, text=True,
+    )
+    if expected_entry not in r.stdout:
+        failures.append(
+            f"{desc}: debugfs ls {path}: expected entry {expected_entry!r}, "
+            f"got {r.stdout!r}"
+        )
+        return False
+    return True
+
+
+def run_debugfs_stat(image, path, expected_fields, desc):
+    """Use debugfs to stat an inode and verify expected fields are present."""
+    r = subprocess.run(
+        ["debugfs", "-R", f"stat {path}", image],
+        capture_output=True, text=True,
+    )
+    for field in expected_fields:
+        if field not in r.stdout:
+            failures.append(
+                f"{desc}: debugfs stat {path}: expected {field!r}, "
+                f"got {r.stdout!r}"
+            )
+            return False
+    return True
+
+
+def run_debugfs_link_count(image, path, desc):
+    """Use debugfs to stat an inode and return its link count as an int,
+    or -1 if it cannot be parsed."""
+    r = subprocess.run(
+        ["debugfs", "-R", f"stat {path}", image],
+        capture_output=True, text=True,
+    )
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("Links:"):
+            # debugfs prints "Links: N" (or "Links: N   ....")
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    return int(parts[1])
+                except ValueError:
+                    pass
+    failures.append(f"{desc}: could not parse link count from {r.stdout!r}")
+    return -1
 
 
 def boot_no_disk(markers, desc):
@@ -368,9 +510,142 @@ def main():
             "phase 3b (cache exercise)",
         )
 
-        # --- Phase 4: malformed disk images must not mount or panic ---
+        # Capture the root directory's link count before mkdir so we can
+        # verify the parent link count increased after the guest creates a
+        # subdirectory.
+        root_links_before = run_debugfs_link_count(
+            image, "/", "root link count before mkdir",
+        )
 
-        # 4a: wrong magic (not ext2 at all)
+        # --- Phase 5: mkdir, output redirection, pipeline+redirect ---
+        # Create a directory, redirect echo into a nested file, and exercise
+        # pipeline+redirect interaction — all from the shell.
+        ok = boot_and_run_seq(
+            image,
+            [
+                "mkdir disk/mydir",
+                "echo redirtest > disk/mydir/file.txt",
+                "echo hello | upper > disk/pipe.txt",
+            ],
+            "phase 5 (mkdir + redirect)",
+        )
+        if not ok:
+            pass  # fall through to e2fsck for diagnostics
+
+        # The non-final-stage redirect: wc saw EOF (0 0 0) and side.txt
+        # holds the redirected data, proving the pipe was still created and
+        # closed correctly even though stdout went to a file.
+        boot_and_run(
+            image, "echo side > disk/side.txt | wc",
+            ["0 0 0"],
+            "phase 5 (non-final stage redirect: downstream sees EOF)",
+        )
+
+        # Read back the redirected files in fresh boots.
+        boot_and_run(
+            image, "cat disk/mydir/file.txt",
+            ["redirtest"],
+            "phase 5 readback (cat redirected file)",
+        )
+        boot_and_run(
+            image, "cat disk/pipe.txt",
+            ["HELLO"],
+            "phase 5 readback (cat pipeline-redirected file)",
+        )
+        boot_and_run(
+            image, "cat disk/side.txt",
+            ["side"],
+            "phase 5 readback (cat non-final-stage redirect file)",
+        )
+
+        # --- e2fsck after mkdir + redirect ---
+        run_e2fsck(image, "e2fsck after mkdir + redirect")
+
+        # --- debugfs: verify directory entries, content, and link counts ---
+        run_debugfs_ls(image, "/mydir", "file.txt", "debugfs ls /mydir")
+        run_debugfs_stat(
+            image, "/mydir", ["directory", "Links: 2"],
+            "debugfs stat /mydir",
+        )
+        run_debugfs_cat(
+            image, "/mydir/file.txt", "redirtest",
+            "debugfs cat /mydir/file.txt",
+        )
+        run_debugfs_cat(
+            image, "/pipe.txt", "HELLO",
+            "debugfs cat /pipe.txt",
+        )
+        run_debugfs_cat(
+            image, "/side.txt", "side",
+            "debugfs cat /side.txt",
+        )
+        # Verify the root (parent) link count increased by 1 after mkdir.
+        if root_links_before >= 0:
+            root_links_after = run_debugfs_link_count(
+                image, "/", "root link count after mkdir",
+            )
+            if root_links_after >= 0:
+                if root_links_after != root_links_before + 1:
+                    failures.append(
+                        f"root link count: expected {root_links_before + 1}, "
+                        f"got {root_links_after}"
+                    )
+
+        # --- Phase 6: reboot, verify mkdir + redirect persistence ---
+        boot_and_run(
+            image, "cat disk/mydir/file.txt",
+            ["redirtest"],
+            "phase 6 (reboot: redirected file persists)",
+        )
+        boot_and_run(
+            image, "cat disk/pipe.txt",
+            ["HELLO"],
+            "phase 6 (reboot: pipeline-redirected file persists)",
+        )
+        boot_and_run(
+            image, "cat disk/side.txt",
+            ["side"],
+            "phase 6 (reboot: non-final-stage redirect persists)",
+        )
+
+        # --- e2fsck + debugfs after reboot ---
+        run_e2fsck(image, "e2fsck after reboot (mkdir)")
+        run_debugfs_ls(image, "/mydir", "file.txt",
+                        "debugfs after reboot (dir listing)")
+        run_debugfs_stat(
+            image, "/mydir", ["directory", "Links: 2"],
+            "debugfs after reboot (dir stat)",
+        )
+        run_debugfs_cat(
+            image, "/mydir/file.txt", "redirtest",
+            "debugfs after reboot (file content)",
+        )
+
+        # --- Phase 7: shell redirection error cases ---
+        boot_and_run(
+            image, "echo hello >",
+            ["needs a filename"],
+            "error: missing redirect filename",
+        )
+        boot_and_run(
+            image, "echo hi > disk/a > disk/b",
+            ["duplicate"],
+            "error: duplicate output redirection",
+        )
+        # A redirection operator as the filename is a missing-filename error,
+        # not a file literally named '>'.
+        boot_and_run(
+            image, "echo hi > >",
+            ["needs a filename"],
+            "error: operator as redirect filename",
+        )
+
+        # e2fsck should still be clean (error cases create no files).
+        run_e2fsck(image, "e2fsck after error cases")
+
+        # --- Phase 8: malformed disk images must not mount or panic ---
+
+        # 8a: wrong magic (not ext2 at all)
         bad_magic = os.path.join(tmp, "bad_magic.img")
         with open(bad_magic, "wb") as f:
             f.truncate(4 * 1024 * 1024)
@@ -379,7 +654,7 @@ def main():
             f.write(b"\x00\x00")  # wrong magic
         boot_bad_disk(bad_magic, "bad magic")
 
-        # 4b: unsupported features (set incompat feature bit)
+        # 8b: unsupported features (set incompat feature bit)
         bad_feat = os.path.join(tmp, "bad_feat.img")
         create_image(bad_feat, srcdir)
         with open(bad_feat, "r+b") as f:
@@ -387,7 +662,7 @@ def main():
             f.write(b"\x01\x00\x00\x00")  # set bit 0 (journal)
         boot_bad_disk(bad_feat, "unsupported incompat feature")
 
-        # 4c: too-large geometry (blocks count exceeds device)
+        # 8c: too-large geometry (blocks count exceeds device)
         bad_geom = os.path.join(tmp, "bad_geom.img")
         with open(bad_geom, "wb") as f:
             f.truncate(512 * 1024)  # 512 KB — much smaller than 4 MB fs
@@ -403,7 +678,7 @@ def main():
             f.write(struct.pack("<I", 0x00100000))  # claim 1M blocks
         boot_bad_disk(bad_geom, "out-of-device geometry")
 
-        # 4d: data pointer into metadata (root inode i_block[0] points at
+        # 8d: data pointer into metadata (root inode i_block[0] points at
         # the superblock block). The mount must reject this because the
         # pointer is below first_data_block.
         bad_ptr = os.path.join(tmp, "bad_ptr.img")
@@ -429,8 +704,10 @@ def main():
             print("  - " + f)
         return 1
     print("PASS (ext2 mount, nested listing/reads, guest write, "
-          "reboot persistence, repeat-open cache, malformed-mount rejection, "
-          "no-disk boot, e2fsck clean, debugfs content verified)")
+          "reboot persistence, repeat-open cache, mkdir + redirect, "
+          "non-final-stage redirect, redirect error cases, "
+          "malformed-mount rejection, no-disk boot, "
+          "e2fsck clean, debugfs content/link counts verified)")
     return 0
 
 

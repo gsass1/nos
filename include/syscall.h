@@ -34,6 +34,7 @@
 #define SYS_EXEC2   26  // exec2(path, argv, int fds[3]) -> pid; child fd i = caller's fd fds[i], -1 = inherit
 #define SYS_OPENMODE 27 // openmode(const char *path, int flags) -> fd, or -1
 #define SYS_LISTDIR  28  // listdir(const char *path, uint idx, char *name[128]) -> 0, or -1 at end
+#define SYS_MKDIR   29  // mkdir(const char *path) -> 0, or -1
 
 // Flags for SYS_OPENMODE (backward-compatible: SYS_OPEN is read-only).
 #define O_RDONLY  0x0

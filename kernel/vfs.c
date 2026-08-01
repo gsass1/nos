@@ -127,3 +127,15 @@ int vfs_truncate(struct fs_node *node)
     }
     return -1;
 }
+
+int vfs_mkdir(struct fs_node *dir, const char *name)
+{
+    if (!dir || (dir->flags & 0x7) != FS_DIRECTORY || !dir->impl) {
+        return -1;
+    }
+    struct fs_ops *ops = (struct fs_ops *)(dir->impl);
+    if (!ops->mkdir) {
+        return -1;
+    }
+    return ops->mkdir(dir, name);
+}

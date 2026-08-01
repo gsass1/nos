@@ -296,6 +296,54 @@ static int sys_listdir(const char *path, uint32_t index, char *name)
     return 0;
 }
 
+// Create a directory at `path`. Splits into parent + leaf, resolves the
+// parent, and calls vfs_mkdir. Returns 0 on success, -1 on failure (bad
+// path, parent not found or not a directory, name exists, or fs doesn't
+// support mkdir).
+static int sys_mkdir(const char *path)
+{
+    if (!user_path_ok(path)) {
+        return -1;
+    }
+
+    char kpath[128];
+    strncpy(kpath, path, sizeof(kpath) - 1);
+    kpath[sizeof(kpath) - 1] = '\0';
+    if (kpath[0] == '\0') {
+        return -1;
+    }
+
+    // Split into parent path and leaf name.
+    int last = -1;
+    for (int i = 0; kpath[i]; i++) {
+        if (kpath[i] == '/') last = i;
+    }
+    struct fs_node *parent;
+    const char *leaf;
+    if (last < 0) {
+        parent = fs_root;
+        leaf = kpath;
+    } else {
+        kpath[last] = '\0';
+        leaf = kpath + last + 1;
+        if (*leaf == '\0' || *leaf == '/') {
+            return -1;
+        }
+        if (kpath[0] == '\0') {
+            parent = fs_root;
+        } else {
+            parent = vfs_resolve(kpath);
+        }
+    }
+    if (!parent || (parent->flags & 0x7) != FS_DIRECTORY) {
+        return -1;
+    }
+    if (vfs_mkdir(parent, leaf) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int sys_read(int fd, char *buf, uint32_t len)
 {
     struct file *f = fd_get(fd);
@@ -657,6 +705,9 @@ void syscall_dispatch(struct regs *r)
     case SYS_LISTDIR:
         r->eax = (uint32_t)sys_listdir((const char *)r->ebx, r->ecx,
                                        (char *)r->edx);
+        break;
+    case SYS_MKDIR:
+        r->eax = (uint32_t)sys_mkdir((const char *)r->ebx);
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

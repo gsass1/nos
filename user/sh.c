@@ -16,14 +16,15 @@ static void cmd_ls(void)
     }
 }
 
-// Split one pipeline stage into argv words in place, peeling off a "< file"
-// input redirection (the '<' must be its own word). Returns argc, or -1 if
-// '<' has no filename after it.
-static int parse_stage(char *s, char *argv[], char **infile)
+// Split one pipeline stage into argv words in place, peeling off "< file"
+// input and "> file" output redirections (each operator must be its own
+// word). Returns argc, or a negative error code:
+//   -1: '<' has no filename,  -2: '>' has no filename,  -3: duplicate '>'
+static int parse_stage(char *s, char *argv[], char **infile, char **outfile)
 {
-    char *words[MAX_ARGS + 2]; // room for "<" and its filename besides argv
+    char *words[MAX_ARGS + 4]; // room for "<", its file, ">", its file besides argv
     int n = 0;
-    while (*s && n < MAX_ARGS + 2) {
+    while (*s && n < MAX_ARGS + 4) {
         while (*s == ' ') {
             *s++ = '\0';
         }
@@ -38,12 +39,25 @@ static int parse_stage(char *s, char *argv[], char **infile)
 
     int argc = 0;
     *infile = 0;
+    *outfile = 0;
+    int got_out = 0;
     for (int i = 0; i < n; i++) {
         if (streq(words[i], "<")) {
-            if (i + 1 >= n) {
+            // A redirection operator must be followed by a plain filename,
+            // not another operator or end-of-line.
+            if (i + 1 >= n || streq(words[i + 1], "<") || streq(words[i + 1], ">")) {
                 return -1;
             }
             *infile = words[++i];
+        } else if (streq(words[i], ">")) {
+            if (i + 1 >= n || streq(words[i + 1], "<") || streq(words[i + 1], ">")) {
+                return -2;
+            }
+            if (got_out) {
+                return -3;
+            }
+            *outfile = words[++i];
+            got_out = 1;
         } else if (argc < MAX_ARGS) {
             argv[argc++] = words[i];
         }
@@ -79,10 +93,18 @@ static void run_pipeline(char *line)
     for (int i = 0; i < nstages; i++) {
         char *argv[MAX_ARGS + 1];
         char *infile;
-        int argc = parse_stage(stages[i], argv, &infile);
+        char *outfile;
+        int argc = parse_stage(stages[i], argv, &infile, &outfile);
         if (argc <= 0) {
-            put(argc < 0 ? "nsh: '<' needs a filename\n"
-                         : "nsh: empty pipeline stage\n");
+            if (argc == 0) {
+                put("nsh: empty pipeline stage\n");
+            } else if (argc == -1) {
+                put("nsh: '<' needs a filename\n");
+            } else if (argc == -2) {
+                put("nsh: '>' needs a filename\n");
+            } else {
+                put("nsh: duplicate '>'\n");
+            }
             break;
         }
 
@@ -105,6 +127,9 @@ static void run_pipeline(char *line)
             in = ffd;
         }
 
+        // Always create the pipe for non-final stages, even when stdout is
+        // redirected — the downstream stage still needs a stdin to read from,
+        // and will see EOF when the shell closes the write end.
         int p[2] = { -1, -1 };
         if (i < nstages - 1 && pipe(p) < 0) {
             put("nsh: out of fds\n");
@@ -114,13 +139,42 @@ static void run_pipeline(char *line)
             break;
         }
 
-        int fds[3] = { in, p[1], -1 }; // -1 entries inherit the shell's own
+        // Determine stdout: a redirect file wins over the pipe write end.
+        // -1 means inherit the shell's own stdout.
+        int out = -1;
+        if (outfile) {
+            out = openmode(outfile, O_CREATE | O_TRUNC | O_WRONLY);
+            if (out < 0) {
+                put("nsh: cannot create ");
+                put(outfile);
+                put("\n");
+                if (in >= 0) {
+                    close(in);
+                }
+                if (p[0] >= 0) {
+                    close(p[0]);
+                }
+                if (p[1] >= 0) {
+                    close(p[1]);
+                }
+                break;
+            }
+        } else if (p[1] >= 0) {
+            out = p[1];
+        }
+
+        int fds[3] = { in, out, -1 }; // -1 entries inherit the shell's own
         int pid = exec2(argv[0], argv, fds);
         // The child now holds its own references; drop ours so the pipe
         // sees EOF once the stages themselves exit.
         if (in >= 0) {
             close(in);
         }
+        // Close the redirect file if we opened one (not the pipe write end).
+        if (out >= 0 && out != p[1]) {
+            close(out);
+        }
+        // Always close the pipe write end so the downstream stage sees EOF.
         if (p[1] >= 0) {
             close(p[1]);
         }
@@ -170,8 +224,8 @@ static void run(char *line)
     // else (single commands, redirects, pipelines) goes to run_pipeline.
     if (firstword(line, "help")) {
         put("builtins: help  ls  clear  exit\n");
-        put("anything else runs initrd programs, with | and < plumbing\n");
-        put("(try: cat symtable | upper)\n");
+        put("anything else runs initrd programs, with | < > plumbing\n");
+        put("(try: cat symtable | upper, or echo hi > disk/out)\n");
     } else if (firstword(line, "ls")) {
         cmd_ls();
     } else if (firstword(line, "clear")) {

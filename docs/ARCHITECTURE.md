@@ -412,6 +412,8 @@ dispatches a line:
 
 - builtins: `help`, `ls` (via `SYS_READDIR`), `clear`, `exit`;
 - anything else: `SYS_EXEC` it as a program, then `SYS_WAIT` for it to finish.
+  Pipelines (`|`), input redirection (`<`), and output redirection (`>`)
+  are handled by the shell via `SYS_PIPE`/`SYS_EXEC2` and `SYS_OPENMODE`.
 
 So typing `hello` loads and runs `/hello` in its own address space and returns to
 the prompt when it exits. The shell and `hello` both link at `0x40000000` and
@@ -454,6 +456,14 @@ The ext2 driver supports:
   `SYS_OPENMODE` with `O_CREATE`/`O_TRUNC`/`O_WRONLY` opens or creates a
   writable fd; `sys_write` routes `FD_FILE` writes through VFS with access-mode
   enforcement (the `FD_WRITABLE` flag).
+- **Directory creation**: `SYS_MKDIR` creates a directory in an existing parent.
+  The ext2 driver allocates an inode and one data block, initializes `.` and `..`
+  records (mode 0755, links=2, size=1024, i_blocks=2), then persists the parent
+  link-count and group `bg_used_dirs_count` increments before inserting the
+  child entry. If any metadata write or the entry insertion fails, the count
+  values are restored and the allocated inode/block are freed, so a failed
+  mkdir leaves no dangling entry or stale counts. `bg_used_dirs_count` is
+  bounds-checked against `s_inodes_count` before incrementing.
 - **Metadata**: inode/block bitmaps, free counts in the superblock and group
   descriptor, inode size/block counts/link count, and directory entries are
   maintained on every mutation. Newly allocated blocks are zeroed. A per-mount
@@ -464,8 +474,9 @@ Validation on mount: magic (0xEF53), revision 0, all three feature masks
 non-zero geometry, in-range block/inode pointers, and valid directory record
 lengths. Mounting never formats — an invalid filesystem is silently skipped.
 
-Intentional limitations: no unlink, mkdir, symlinks, multi-block-group writes,
-or journaling. The `disktest` user utility exercises listing, reads, and writes.
+Intentional limitations: no unlink, rmdir, symlinks, multi-block-group writes,
+or journaling. The `disktest` user utility exercises listing, reads, and writes;
+the `mkdir` utility creates directories from the shell.
 
 ---
 
@@ -478,7 +489,7 @@ or journaling. The `disktest` user utility exercises listing, reads, and writes.
 | Serial  | `drivers/serial.c`  | COM1; mirrors console output (used for logging/tests) |
 | PIT     | `kernel/pit.c`      | 200 Hz timer; IRQ0 drives the scheduler |
 | ATA     | `drivers/ata.c`     | Legacy primary/secondary PIO; IDENTIFY plus bounded polling LBA28 reads, writes, and cache flush |
-| ext2    | `kernel/ext2.c`     | Revision-0 ext2 read/write: mount validation, directory listing/lookup, file read (direct + singly-indirect), create/truncate/write with bitmap/free-count maintenance; serialized by per-mount mutex |
+| ext2    | `kernel/ext2.c`     | Revision-0 ext2 read/write: mount validation, directory listing/lookup, file read (direct + singly-indirect), create/truncate/write, mkdir with bitmap/free-count/link-count maintenance; serialized by per-mount mutex |
 
 `kprintf` writes to both VGA and serial (guarded by a mutex); `mprintf` prefixes
 a module tag; `panic` prints a message and a symbolic stack trace, then halts.
@@ -501,8 +512,8 @@ first ATA device. No raw disk interface is exposed to ring 3.
   with an `iret` to the user segments instead of `0x08`. The `sh`/`hello`
   binaries won't need to change.
 - **ext2** is limited to revision 0, 1 KiB blocks, one block group, no
-  features. Supports read (direct + singly-indirect), create, truncate, and
-  write of regular files in existing directories. No unlink, mkdir, symlinks,
+  features. Supports read (direct + singly-indirect), create, truncate, write,
+  and mkdir for existing parent directories. No unlink, rmdir, symlinks,
   multi-group writes, or journaling.
 - **Heap** doesn't split or coalesce; fixed 2.4 MiB.
 - **Scheduler** is plain round-robin, no priorities or sleeping (blocking calls
@@ -533,7 +544,7 @@ first ATA device. No raw disk interface is exposed to ring 3.
 | `kernel/vfs.c`, `kernel/initrd.c` | VFS (hierarchical path resolution) + initrd (tar) |
 | `kernel/vga.c`, `drivers/keyboard.c`, `drivers/serial.c` | Drivers |
 | `kernel/kernel.c` | `kprintf`/`mprintf`/`panic`, symbol table, stack traces |
-| `user/sh.c`, `user/hello.c`, `user/disktest.c`, `user/user.ld` | Userspace programs |
+| `user/sh.c`, `user/hello.c`, `user/disktest.c`, `user/mkdir.c`, `user/user.ld` | Userspace programs |
 | `include/*.h` | Public headers for each subsystem |
 
 ---
