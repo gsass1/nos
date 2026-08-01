@@ -8,27 +8,34 @@ struct task
 {
     int id;
     char name[256];
+    // Saved kernel stack pointer. Points at a trap frame laid out exactly like
+    // the one _asm_irq_0 builds, so the scheduler can iret into any task
+    // whether it was preempted by the timer or yielded cooperatively.
     uint32_t esp;
-    uint32_t ebp;
-    uint32_t eip;
-    void *stack;
-    void *stack_top;
+    // Base of the heap-allocated kernel stack (0 for the boot/kernel task,
+    // which runs on the bootstrap stack from boot.S).
+    void *stack_mem;
     struct page_directory *page_directory;
     struct task *next;
 };
 
-void print_task_info(void);
-
-int spawn_task(const char *name, void *addr);
-
 void tasking_init(void);
 
+// Create a runnable kernel thread that begins executing at `entry`.
+int spawn_task(const char *name, void *entry);
+
+// Cooperative yield. Picks the next task and switches to it, returning to the
+// caller when this task is next scheduled. Also used as the timer-preemption
+// entry point (see _asm_irq_0 / schedule()).
 void task_switch(void);
 
-int fork(void);
-
-void move_stack(void *new_stack_start, uint32_t size);
+// Terminate the current task and switch away permanently. Never returns.
+void exit(void);
 
 int getpid(void);
+
+const char *getpname(void);
+
+void print_task_info(void);
 
 #endif

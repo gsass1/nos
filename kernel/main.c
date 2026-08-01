@@ -110,6 +110,57 @@ loop:
     }
 }
 
+// --- Preemptive multitasking demo -----------------------------------------
+// Two worker tasks and the kernel task all busy-loop and print periodically.
+// None of them yields voluntarily, so any interleaving in the output is proof
+// that the PIT timer is preempting and round-robin scheduling all three.
+
+static volatile int demo_finished = 0;
+
+static void demo_delay(void)
+{
+    for(volatile uint32_t i = 0; i < 6000000; i++) {
+        /* burn a few timeslices between prints */
+    }
+}
+
+static void demo_task_a(void)
+{
+    for(int i = 0; i < 5; i++) {
+        kprintf("[A:%d] ", i);
+        demo_delay();
+    }
+    demo_finished++;
+    exit();
+}
+
+static void demo_task_b(void)
+{
+    for(int i = 0; i < 5; i++) {
+        kprintf("[B:%d] ", i);
+        demo_delay();
+    }
+    demo_finished++;
+    exit();
+}
+
+static void multitask_demo(void)
+{
+    kprintf("Multitasking demo (preemptive round-robin, no voluntary yields):\n");
+
+    spawn_task("demo_a", demo_task_a);
+    spawn_task("demo_b", demo_task_b);
+
+    // The kernel task keeps working too; the timer preempts it just like the
+    // workers. When both workers have exit()ed we fall through to the shell.
+    while(demo_finished < 2) {
+        kprintf("[K] ");
+        demo_delay();
+    }
+
+    kprintf("\nDemo done: both worker tasks exited cleanly.\n");
+}
+
 // Assembly code from boot.S jumps directly to here
 void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 {
@@ -156,15 +207,15 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	// Initialize symbol resolution
 	sym_init();
 
-	// Initialize tasking
-	// Disabled: move_stack() relocates the stack via a captured esp/ebp that
-	// modern GCC invalidates around the intervening memcpy call, so it returns
-	// to a garbage address and faults. Tasking is currently unused (shell runs
-	// directly below, no tasks are spawned), so this is safe to skip until
-	// move_stack is rewritten in assembly.
-	// tasking_init();
+	// Initialize preemptive tasking. The kernel thread adopts the current
+	// stack; the PIT IRQ drives round-robin scheduling from here on.
+	tasking_init();
 
 	// Hooray, we are booted.
     kprintf("Welcome to NOS!\n");
+
+	// Prove multitasking works before dropping into the shell.
+	multitask_demo();
+
 	shell();
 }

@@ -1,7 +1,6 @@
 #include <kernel.h>
 #include <io.h>
 #include <pit.h>
-#include <task.h>
 
 MODULE("PIT ");
 
@@ -55,9 +54,4 @@ void pit_init_timer(uint32_t freq)
     // Send the frequency divisor.
     outb(0x40, l);
     outb(0x40, h);
-}
-
-void pit_irq()
-{
-    task_switch();
 }

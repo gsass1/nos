@@ -1,4 +1,4 @@
-.global _asm_default_int, _asm_reserved_int, _asm_exc_DIV0, _asm_exc_DEBUG, _asm_exc_BP, _asm_exc_NOMATH, _asm_exc_MF, _asm_exc_TSS, _asm_exc_SWAP, _asm_exc_AC, _asm_exc_MC, _asm_exc_XM, _asm_exc_NMI, _asm_exc_OVRFLW, _asm_exc_BOUNDS, _asm_exc_OPCODE, _asm_exc_DOUBLEF, _asm_exc_STACKF, _asm_exc_GP, _asm_exc_PF, _asm_irq_0, _asm_irq_1, _asm_irq_7
+.global _asm_default_int, _asm_reserved_int, _asm_exc_DIV0, _asm_exc_DEBUG, _asm_exc_BP, _asm_exc_NOMATH, _asm_exc_MF, _asm_exc_TSS, _asm_exc_SWAP, _asm_exc_AC, _asm_exc_MC, _asm_exc_XM, _asm_exc_NMI, _asm_exc_OVRFLW, _asm_exc_BOUNDS, _asm_exc_OPCODE, _asm_exc_DOUBLEF, _asm_exc_STACKF, _asm_exc_GP, _asm_exc_PF, _asm_irq_0, _asm_irq_1, _asm_irq_7, task_switch
 
 .macro  SAVE_REGS
     pushad
@@ -167,7 +167,13 @@ _asm_exc_PF:
 
 _asm_irq_0:
     SAVE_REGS
-    call pit_irq
+    # Hand the current trap frame to the scheduler and adopt whatever stack it
+    # returns. When it picks a different task, mov esp swaps us onto that task's
+    # kernel stack; RESTORE_REGS + iret below then resume it. The EOI is sent
+    # unconditionally, so a switch never leaves the PIC waiting (the old bug).
+    push esp
+    call schedule
+    mov esp, eax
     mov al,0x20
     out 0x20,al
     RESTORE_REGS
@@ -186,3 +192,24 @@ _asm_irq_7:
     call isr_spurious
     RESTORE_REGS
     iret
+
+# void task_switch(void)
+#
+# Cooperative yield. We hand-build the exact same trap frame the CPU + SAVE_REGS
+# leave on a timer interrupt, so schedule() cannot tell a voluntary yield apart
+# from a preemption and both resume identically. When this task is next picked,
+# the matching RESTORE_REGS/iret (in whichever switch selects us) lands on
+# .task_switch_resume, and we return to our caller with all registers intact.
+task_switch:
+    pushf                            # eflags (caller's IF, restored on resume)
+    cli                              # make the switch itself atomic
+    push cs                          # cs
+    push offset .task_switch_resume  # eip to resume at
+    SAVE_REGS
+    push esp
+    call schedule
+    mov esp, eax                     # adopt next task's stack (drops the arg)
+    RESTORE_REGS
+    iret
+.task_switch_resume:
+    ret

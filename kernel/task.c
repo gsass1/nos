@@ -1,79 +1,44 @@
 #include <mm.h>
 #include <string.h>
-#include <string.h>
 #include <task.h>
 #include <kernel.h>
 #include <debug.h>
 
 MODULE("TASK");
 
+// The task currently on the CPU and the head of the round-robin ready queue.
+// Both are NULL until tasking_init() runs, which is how schedule()/task_switch()
+// stay safe no-ops during early boot (mprintf -> mutex -> task_switch).
 volatile struct task *current_task;
 volatile struct task *ready_queue;
 
-extern uint32_t initial_esp;
-extern uint32_t read_eip();
+static uint32_t next_pid = 0;
 
-uint32_t next_pid = 0;
-
-void idle_task(void)
+// Selects the next task to run. Called from assembly (both the timer IRQ and
+// the cooperative task_switch yield) with `esp` pointing at the outgoing task's
+// trap frame; returns the incoming task's saved esp. On the very first tick,
+// current_task is already set but its esp is stale (0) -- we still overwrite it
+// with the real boot esp here, capturing the kernel task's live context.
+uint32_t schedule(uint32_t esp)
 {
-    while(1) {
-        task_switch();
-    }
-}
-
-void idle_task2(void)
-{
-    while(1) {
-        kprintf("b\n");
-        task_switch();
-    }
-}
-
-void shell_task(void)
-{
-    kprintf("HELLO IM THE SHELL TASK!");
-}
-
-void exit(void)
-{
-    if(getpid() == 0) {
-        panic("Cannot kill kernel task!\n");
+    if (!current_task) {
+        // Tasking not initialised yet: nothing to switch to.
+        return esp;
     }
 
-    asm volatile("cli");
+    current_task->esp = esp;
 
-//Find previous task
-    struct task *task_prev = 0;
-    struct task *task_r = ( struct task* ) ready_queue;
+    current_task = current_task->next ? current_task->next : ready_queue;
 
-    for ( ; task_r->next != 0; task_r = task_r->next ) {
-        if ( task_r->next == current_task ) {
-            //We got the previous task
-            task_prev = task_r;
-            break; //Don't bother with the rest of the list
-        }
+    // Only reload cr3 when the address space actually changes. Kernel threads
+    // all share one directory, so this normally avoids a needless TLB flush.
+    if (current_task->page_directory &&
+        current_task->page_directory != current_directory) {
+        current_directory = current_task->page_directory;
+        asm volatile("mov %0, %%cr3" :: "r"(current_directory->phys_addr));
     }
 
-    //We didn't find the task and it is not the ready_queue
-    if ( !task_prev && current_task != ready_queue ) {
-        return;
-    }
-
-    //if our current task is the ready_queue then set the starting task as the next task after current_task
-    if ( current_task == ready_queue ) {
-        ready_queue = current_task->next;
-
-    } else {
-        task_prev->next = current_task->next;
-    }
-
-    kfree((void *)current_task);
-    kfree(current_task->stack_top);
-    kfree(current_task->page_directory);
-
-    asm volatile("sti");
-    task_switch();
+    return current_task->esp;
 }
 
 void tasking_init(void)
@@ -82,271 +47,117 @@ void tasking_init(void)
 
     asm volatile("cli");
 
-    move_stack((void *)0xE0000000, 0x2000);
-
+    // The kernel task adopts the stack we are already running on (from boot.S).
+    // We don't build a frame for it: its real esp is captured by schedule() on
+    // the first timer tick, and it resumes wherever it was preempted.
     current_task = ready_queue = kmalloc(sizeof(struct task));
     current_task->id = next_pid++;
-    current_task->esp = current_task->ebp = 0;
-    current_task->eip = 0;
+    current_task->esp = 0;
+    current_task->stack_mem = 0;
     current_task->page_directory = current_directory;
     current_task->next = 0;
-    current_task->stack = kmalloc(0x1000) + 0x1000;
-    current_task->esp = (uint32_t)current_task->stack;
-    current_task->stack_top = (void *)((uint32_t)current_task->stack - 0x1000);
+    strcpy((char *)current_task->name, "kernel_task");
 
-    uint32_t *stack = (uint32_t *)current_task->stack;
-
-    *--stack = 0x202; // EFLAGS
-    *--stack = 0x08;  // CS
-    *--stack = 0;     // EIP
-    *--stack = 0;   // NULL
-    *--stack = 0;   // EBX
-    *--stack = 0;   // EDX
-    *--stack = 0;   // ECX
-    *--stack = 0;   // EAX
-    *--stack = 0x10;    // DS
-    *--stack = 0x10;    // ES
-    *--stack = 0x10;    // FS
-    *--stack = 0x10;    // GS
-
-    current_task->stack = (void *)stack;
-
-    strcpy(current_task->name, "kernel_task");
-
-    mprintf(LOGLEVEL_DEFAULT, "Created kernel_task\n");
-
-    //spawn_task("idle", idle_task);
+    mprintf(LOGLEVEL_DEFAULT, "Created kernel_task (pid %d)\n", current_task->id);
 
     asm volatile("sti");
 }
 
-int spawn_task(const char *name, void *addr)
+int spawn_task(const char *name, void *entry)
 {
-    mprintf(LOGLEVEL_DEBUG, "Spawning task %s with eip: 0x%08x\n", name, addr);
+    mprintf(LOGLEVEL_DEBUG, "Spawning task %s with entry: 0x%08x\n", name, entry);
 
     asm volatile("cli");
 
     struct task *task = kmalloc(sizeof(struct task));
-    task->stack = kmalloc(0x1000) + 0x1000;
-    task->esp = (uint32_t)task->stack;
-    task->stack_top = (void *)((uint32_t)task->stack - 0x1000);
-
-    task->page_directory = 0;
-
     task->id = next_pid++;
-
-    uint32_t *stack = (uint32_t *)task->stack;
-
-    // processor data (iret)
-    *--stack = 0x202;   // EFLAGS
-    *--stack = 0x08;    // CS
-    *--stack = (uint32_t)addr; // EIP
-    task->eip = (uint32_t)addr;
-
-    // pusha
-    *--stack = 0;   // EDI
-    *--stack = 0;   // ESI
-    *--stack = 0;   // EBP
-    task->ebp = 0;
-    *--stack = 0;   // NULL
-    *--stack = 0;   // EBX
-    *--stack = 0;   // EDX
-    *--stack = 0;   // ECX
-    *--stack = 0;   // EAX
-
-    // data segments
-    *--stack = 0x10;    // DS
-    *--stack = 0x10;    // ES
-    *--stack = 0x10;    // FS
-    *--stack = 0x10;    // GS
-
-    task->stack = (void *)stack;
-
+    task->page_directory = (struct page_directory *)current_directory;
+    task->next = 0;
     strcpy(task->name, name);
 
-    task->next = 0;
+    // Allocate a kernel stack and prime it with a trap frame identical to the
+    // one _asm_irq_0 leaves behind, so the scheduler can iret straight into
+    // `entry` as if this task had just been preempted there.
+    const uint32_t stack_size = 0x1000;
+    uint8_t *stack_mem = kmalloc(stack_size);
+    task->stack_mem = stack_mem;
 
-    struct task *tmp_task;
-    tmp_task = ( struct task* )ready_queue;
+    uint32_t *sp = (uint32_t *)(stack_mem + stack_size);
 
-    while ( tmp_task->next != 0 ) {
-        tmp_task = tmp_task->next;
+    // iret frame (ring0 -> ring0: CPU pushes no ss/esp).
+    *--sp = 0x202;              // eflags: reserved bit 1 + IF set
+    *--sp = 0x08;              // cs (kernel code segment)
+    *--sp = (uint32_t)entry;    // eip
+    // pushad block (values are don't-cares; order matches popad).
+    *--sp = 0;                  // eax
+    *--sp = 0;                  // ecx
+    *--sp = 0;                  // edx
+    *--sp = 0;                  // ebx
+    *--sp = 0;                  // esp (ignored by popad)
+    *--sp = 0;                  // ebp
+    *--sp = 0;                  // esi
+    *--sp = 0;                  // edi
+    // Segment registers, laid out so RESTORE_REGS pops gs,fs,es,ds in order.
+    *--sp = 0x10;              // ds
+    *--sp = 0x10;              // es
+    *--sp = 0x10;              // fs
+    *--sp = 0x10;              // gs
+
+    task->esp = (uint32_t)sp;
+
+    // Append to the end of the ready queue.
+    struct task *tail = (struct task *)ready_queue;
+    while (tail->next) {
+        tail = tail->next;
     }
+    tail->next = task;
 
-    // ...And extend it.
-    tmp_task->next = task;
+    asm volatile("sti");
 
-    asm volatile("sti"); 
-
-    return task->id; 
+    return task->id;
 }
 
-int fork(void)
+void exit(void)
 {
     asm volatile("cli");
 
-    struct task *parent_task = (struct task *)current_task;
-
-    struct page_directory *directory = clone_directory(current_directory);
-
-    struct task *new_task = kmalloc(sizeof(struct task));
-
-    new_task->id = next_pid++;
-    new_task->esp = new_task->ebp = 0;
-    new_task->eip = 0;
-    new_task->page_directory = directory;
-    new_task->next = 0;
-
-    struct task *tmp_task = (struct task *)ready_queue;
-
-    while(tmp_task->next) {
-        tmp_task = tmp_task->next;
+    if (current_task == ready_queue && current_task->next == 0) {
+        panic("Cannot exit the last remaining task!\n");
     }
 
-    tmp_task->next = new_task;
-
-    uint32_t eip = read_eip();
-
-    if(current_task == parent_task) {
-            // We are the parent, so set up the esp/ebp/eip for our child.
-           uint32_t esp; asm volatile("mov %%esp, %0" : "=r"(esp));
-           uint32_t ebp; asm volatile("mov %%ebp, %0" : "=r"(ebp));
-           new_task->esp = esp;
-           new_task->ebp = ebp;
-           new_task->eip = eip;
-           // All finished: Reenable interrupts.
-           asm volatile("sti");
-           return new_task->id;
+    // Unlink ourselves from the ready queue. We keep current_task->next intact
+    // so schedule() can still advance from this (now orphaned) node.
+    if (current_task == ready_queue) {
+        ready_queue = current_task->next;
     } else {
-        asm volatile("sti");
-        return 0;
-    }
-}
-
-void task_switch(void)
-{
-    if(!current_task) {
-        return;
+        struct task *prev = (struct task *)ready_queue;
+        while (prev->next != current_task) {
+            prev = prev->next;
+        }
+        prev->next = current_task->next;
     }
 
-    uint32_t esp, ebp, eip;
-    asm volatile("mov %%esp, %0" : "=r"(esp));
-    asm volatile("mov %%ebp, %0" : "=r"(ebp));
+    // We're still executing on this task's kernel stack, so we cannot free it
+    // (or the task struct) here -- doing so would pull the rug out from under
+    // the switch below. A proper implementation hands teardown to a reaper
+    // task; for now the memory is intentionally leaked.
+    asm volatile("sti");
 
-    // Read the instruction pointer. We do some cunning logic here:
-    // One of two things could have happened when this function exits -
-    // (a) We called the function and it returned the EIP as requested.
-    // (b) We have just switched tasks, and because the saved EIP is essentially
-    // the instruction after read_eip(), it will seem as if read_eip has just
-    // returned.
-    // In the second case we need to return immediately. To detect it we put a dummy
-    // value in EAX further down at the end of this function. As C returns values in EAX,
-    // it will look like the return value is this dummy value! (0x12345).
-    eip = read_eip();
+    // Switch away for good. Because we're unlinked, the scheduler will never
+    // pick this task again, so task_switch() never returns.
+    task_switch();
 
-    // Have we just switched tasks?
-    if (eip == 0x12345) {
-        return;
-    }
-
-    // No, we didn't switch tasks. Let's save some register values and switch.
-    current_task->eip = eip;
-    current_task->esp = esp;
-    current_task->ebp = ebp;
-
-    current_task = current_task->next;
-
-    if(!current_task) {
-        current_task = ready_queue;
-    }
-
-    eip = current_task->eip;
-    esp = current_task->esp;
-    ebp = current_task->ebp;
-
-    if(current_task->page_directory) {
-        current_directory = current_task->page_directory;
-    }
-
-    // Here we:
-    // * Stop interrupts so we don't get interrupted.
-    // * Temporarily put the new EIP location in ECX.
-    // * Load the stack and base pointers from the new task struct.
-    // * Change page directory to the physical address (physicalAddr) of the new directory.
-    // * Put a dummy value (0x12345) in EAX so that above we can recognise that we've just
-    // switched task.
-    // * Restart interrupts. The STI instruction has a delay - it doesn't take effect until after
-    // the next instruction.
-    // * Jump to the location in ECX (remember we put the new EIP in there).
-    //DPRINT("SWITCHING TASK NOW\n");
-    //DPRINT("current_directory->phys_addr: 0x%08x\n", current_directory->phys_addr);
-    asm volatile("cli; \
-        mov %0, %%ecx;\ 
-        mov %1, %%esp;\ 
-        mov %2, %%ebp;\ 
-        mov %3, %%cr3;\ 
-        mov $0x12345, %%eax;\
-        sti; \
-        jmp *%%ecx": : "r"(eip), "r"(esp), "r"(ebp), "r"(current_directory->phys_addr));
-}
-
-void move_stack(void *new_stack_start, uint32_t size)
-{
-    mprintf(LOGLEVEL_DEBUG, "Moving stack\n");
-    mprintf(LOGLEVEL_DEBUG, "New stack start: 0x%08x\n", new_stack_start);
-    mprintf(LOGLEVEL_DEBUG, "Size: %d\n", size);
-
-    uint32_t i;
-
-    for( i = (uint32_t)new_stack_start; i >= (uint32_t)new_stack_start - size; i -= 0x1000) {
-        alloc_frame(get_page(i, 1, current_directory), 0 /* User mode */, 1 /* Is writable */ );
-    }
-
-    uint32_t pd_addr;
-    asm volatile("mov %%cr3, %0" : "=r" (pd_addr));
-    asm volatile("mov %0, %%cr3" : : "r" (pd_addr));
-
-    uint32_t old_stack_pointer;
-    asm volatile("mov %%esp, %0" : "=r" (old_stack_pointer));
-
-    uint32_t old_base_pointer; 
-    asm volatile("mov %%ebp, %0" : "=r" (old_base_pointer));
-
-    uint32_t offset = (uint32_t)new_stack_start - initial_esp;
-
-    uint32_t new_stack_pointer = old_stack_pointer + offset;
-    uint32_t new_base_pointer  = old_base_pointer  + offset;
-
-    memcpy((void*)new_stack_pointer, (void*)old_stack_pointer, initial_esp-old_stack_pointer);
-
-
-    for(i = (uint32_t)new_stack_start; i > (uint32_t)new_stack_start - size; i -= 4)
-    {
-       uint32_t tmp = * (uint32_t*)i;
-       // If the value of tmp is inside the range of the old stack, assume it is a base pointer
-       // and remap it. This will unfortunately remap ANY value in this range, whether they are
-       // base pointers or not.
-       if (( old_stack_pointer < tmp) && (tmp < initial_esp))
-       {
-         tmp = tmp + offset;
-         uint32_t *tmp2 = (uint32_t*)i;
-         *tmp2 = tmp;
-       }
-    }
-
-      // Change stacks.
-      asm volatile("mov %0, %%esp" : : "r" (new_stack_pointer));
-      asm volatile("mov %0, %%ebp" : : "r" (new_base_pointer));
+    panic("exit(): returned from final task_switch!\n");
 }
 
 int getpid(void)
 {
-    return current_task->id;
+    return current_task ? current_task->id : -1;
 }
 
 const char *getpname(void)
 {
-    return current_task->name;
+    return current_task ? (const char *)current_task->name : "<none>";
 }
 
 void print_task_info(void)

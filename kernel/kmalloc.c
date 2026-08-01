@@ -18,7 +18,7 @@ uint32_t heap_end;
 
 #define POINTER_TO_HEAD(A) ((void *)(((uint32_t)A) - sizeof(struct alloc)))
 #define HEAD_TO_POINTER(A) ((void *)(((uint32_t)A) + sizeof(struct alloc)))
-#define PAGE_ALIGNED(a) !(((uint32_t)(a)) & 0xFFFFF000)
+#define PAGE_ALIGNED(a) (!(((uint32_t)(a)) & 0xFFF))
 #define PAGE_ALIGN(a) (a) &= 0xFFFFF000; (a) += 0x1000;
 
 void heap_init(void)

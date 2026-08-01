@@ -60,7 +60,9 @@ static uint32_t first_frame(void)
             }
         }
     }
-    return 0;
+    // No free frame found. Return -1 so alloc_frame's check fires instead of
+    // ambiguously reporting frame 0 as free.
+    return (uint32_t)-1;
 }
 
 void alloc_frame(struct page *page, int is_kernel, int is_writeable)
@@ -100,8 +102,14 @@ void mm_paging_init(void)
     uint32_t mem_end_page = 0x1000000;
 
     nframes = mem_end_page / 0x1000;
-    frames = (uint32_t *)kmalloc(INDEX_FROM_BIT(nframes));
-    memset(frames, 0, INDEX_FROM_BIT(nframes));
+
+    // The bitset needs one bit per frame. INDEX_FROM_BIT(nframes) is the number
+    // of uint32_t words, so the byte size we must hand kmalloc is that count
+    // times sizeof(uint32_t). Passing the word count directly (as before) under-
+    // allocated the bitset 4x and let set_frame() scribble past it into the heap.
+    uint32_t frames_bytes = INDEX_FROM_BIT(nframes) * sizeof(uint32_t);
+    frames = (uint32_t *)kmalloc(frames_bytes);
+    memset(frames, 0, frames_bytes);
 
     kernel_directory = kmalloc_a(sizeof(struct page_directory));
     memset(kernel_directory, 0, sizeof(struct page_directory));
