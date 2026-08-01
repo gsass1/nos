@@ -1,5 +1,7 @@
 #include <elf.h>
+#include <fb.h>
 #include <gdt.h>
+#include <wsurf.h>
 #include <mm.h>
 #include <pipe.h>
 #include <string.h>
@@ -215,6 +217,12 @@ void exit(int code)
     }
 
     close_all_files((struct task *)current_task);
+    // Like the fd table, the display and any window surface must be released
+    // at death, not later: past this point the task never runs again, and
+    // code after the sti below is abandoned if the timer preempts first.
+    fb_task_exit(current_task->id);
+    wsurf_task_exit(current_task->id,
+                    (struct page_directory *)current_task->page_directory);
 
     exit_records[exit_record_next].pid = current_task->id;
     exit_records[exit_record_next].code = code;
@@ -311,6 +319,8 @@ int task_kill(int pid)
     prev->next = t->next;
 
     close_all_files(t);
+    fb_task_exit(t->id);
+    wsurf_task_exit(t->id, t->page_directory);
 
     exit_records[exit_record_next].pid = t->id;
     exit_records[exit_record_next].code = -9;

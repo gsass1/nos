@@ -105,6 +105,23 @@ static inline void *fbmap(void)
     return (void *)r;
 }
 
+// Window surfaces (see syscall.h): client side -- create an offscreen buffer
+// the display server composites, and poll the input events it forwards.
+static inline void *wcreate(int w, int h) { return (void *)sys3(SYS_WCREATE, w, h, 0); }
+static inline int wevent(struct wev *ev)  { return sys1(SYS_WEVENT, (int)ev); }
+
+// Server side: inspect slots, map a client's pixels, send events, release.
+static inline int wstat(int slot, struct wsurf_info *out)
+{
+    return sys3(SYS_WSTAT, slot, (int)out, 0);
+}
+static inline void *wmap(int slot)        { return (void *)sys1(SYS_WMAP, slot); }
+static inline int wsend(int slot, const struct wev *ev)
+{
+    return sys3(SYS_WSEND, slot, (int)ev, 0);
+}
+static inline int wunmap(int slot)        { return sys1(SYS_WUNMAP, slot); }
+
 static inline int slen(const char *s)
 {
     int n = 0;

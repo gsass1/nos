@@ -17,6 +17,9 @@ MON
 tests/serial.log
 tests/serial_net.log
 tests/screen.ppm
+tests/browser_screen.ppm
+tests/surface.ppm
+tests/serial_dbg.log
 tests/wm1.ppm
 tests/wm2.ppm
 tests/wm3.ppm

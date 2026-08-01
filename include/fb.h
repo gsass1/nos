@@ -24,6 +24,16 @@ uint32_t fb_phys_addr(void);
 int fb_enable(void);
 void fb_disable(void);
 
+// Single-owner arbitration for the display: fb_claim fails while another
+// task holds it. fb_task_exit is the death hook -- it releases ownership
+// and restores text mode; it is irq-safe (fb_disable saves/restores EFLAGS)
+// and runs inside the exit()/task_kill() cli sections alongside the fd
+// table teardown.
+int fb_claim(int task_id);
+int fb_owned_by(int task_id);
+void fb_release(int task_id);
+void fb_task_exit(int task_id);
+
 // The saved BIOS text font (256 glyphs x 32 bytes, 8x16 in rows 0-15), or 0
 // if no display was found. FB_FONT_BYTES is the SYS_FONT copy size.
 #define FB_FONT_BYTES (256 * 32)

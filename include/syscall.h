@@ -36,6 +36,42 @@
 #define SYS_CONNECT 28  // connect(uint32_t ip, port)  -> socket fd, or -1; read/write/close as usual
 #define SYS_TIME    29  // time(void)                  -> unix seconds (UTC), or 0 if the RTC was unreadable
 
+// Window surfaces: offscreen pixel buffers shared between a client and the
+// display server (wm), X11-style. The client renders into its buffer; the
+// server composites it into a window and forwards input as events. Clients
+// get at most one surface; it is torn down automatically when they die.
+#define SYS_WCREATE 30  // wcreate(w, h)               -> 32bpp pixel buffer, or -1
+#define SYS_WEVENT  31  // wevent(struct wev *out)     -> 0, or -1 if none pending
+#define SYS_WSTAT   32  // wstat(slot, struct wsurf_info *out) -> 0, or -1 if unused
+#define SYS_WMAP    33  // wmap(slot)                  -> server mapping of the pixels, or -1
+#define SYS_WSEND   34  // wsend(slot, const struct wev *ev) -> 0, or -1
+#define SYS_WUNMAP  35  // wunmap(slot)                -> 0; server releases its mapping
+
+// Window-surface limits (part of the ABI: servers poll slots 0..WSURF_SLOTS-1).
+#define WSURF_SLOTS 3
+#define WSURF_MAX_W 800
+#define WSURF_MAX_H 600
+
+// Events carried by SYS_WEVENT/SYS_WSEND.
+#define WEV_KEY   1 // a = character
+#define WEV_MOUSE 2 // a = x, b = y, c = buttons (window-relative coordinates)
+#define WEV_CLOSE 3 // server asks the client to exit
+
+struct wev
+{
+    int32_t type;
+    int32_t a, b, c;
+};
+
+// Returned by SYS_WSTAT: a snapshot of one surface slot.
+struct wsurf_info
+{
+    int32_t alive; // owner task still running
+    int32_t w, h;
+    int32_t owner; // owner task id
+    char name[16]; // owner's program name
+};
+
 // Returned by SYS_MOUSE: cursor position in framebuffer coordinates,
 // buttons bit0=left bit1=right bit2=middle.
 struct mouse_state

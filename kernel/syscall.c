@@ -16,6 +16,7 @@
 #include <tcp.h>
 #include <vfs.h>
 #include <vga.h>
+#include <wsurf.h>
 
 MODULE("SYSC");
 
@@ -313,7 +314,11 @@ static int sys_fbmap(void)
     if (!fb_present() || !t->brk /* kernel thread */) {
         return -1;
     }
+    if (fb_claim(t->id) < 0) {
+        return -1; // another task owns the display (e.g. wm is running)
+    }
     if (fb_enable() < 0) {
+        fb_release(t->id);
         return -1;
     }
     uint32_t phys = fb_phys_addr();
@@ -329,6 +334,11 @@ static int sys_fbmap(void)
 
 static int sys_fboff(void)
 {
+    struct task *t = task_current();
+    if (!fb_owned_by(t->id)) {
+        return -1; // not this task's display to switch
+    }
+    fb_release(t->id);
     fb_disable();
     // The text plane shares VRAM with the framebuffer, so graphics drawing
     // trashed whatever text was on screen. Reset to a clean console.
@@ -558,6 +568,30 @@ void syscall_dispatch(struct regs *r)
         break;
     case SYS_TIME:
         r->eax = rtc_unix_time();
+        break;
+    case SYS_WCREATE:
+        r->eax = (uint32_t)wsurf_create((int)r->ebx, (int)r->ecx);
+        break;
+    case SYS_WEVENT:
+        r->eax = user_ok((void *)r->ebx, sizeof(struct wev), 1)
+                     ? (uint32_t)wsurf_event((struct wev *)r->ebx)
+                     : (uint32_t)-1;
+        break;
+    case SYS_WSTAT:
+        r->eax = user_ok((void *)r->ecx, sizeof(struct wsurf_info), 1)
+                     ? (uint32_t)wsurf_stat((int)r->ebx, (struct wsurf_info *)r->ecx)
+                     : (uint32_t)-1;
+        break;
+    case SYS_WMAP:
+        r->eax = (uint32_t)wsurf_map((int)r->ebx);
+        break;
+    case SYS_WSEND:
+        r->eax = user_ok((const void *)r->ecx, sizeof(struct wev), 0)
+                     ? (uint32_t)wsurf_send((int)r->ebx, (const struct wev *)r->ecx)
+                     : (uint32_t)-1;
+        break;
+    case SYS_WUNMAP:
+        r->eax = (uint32_t)wsurf_unmap((int)r->ebx);
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

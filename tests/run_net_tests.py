@@ -85,6 +85,10 @@ class Shell:
             time.sleep(0.06)
         self.monitor("sendkey ret")
 
+    def key(self, name):
+        self.monitor("sendkey " + name)
+        time.sleep(0.2)
+
     def run(self, command, markers, desc):
         self.type_line(command)
         for m in markers:
@@ -95,6 +99,43 @@ class Shell:
     def kill(self):
         if self.proc.poll() is None:
             self.proc.kill()
+
+
+def check_browser_screendump(path):
+    """The browser paints a white page with dark text on the 1024x768
+    framebuffer; check the dump is in graphics mode and that the content
+    area contains both paper and a meaningful amount of rendered text."""
+    try:
+        with open(path, "rb") as f:
+            if f.readline().strip() != b"P6":
+                raise ValueError("not a P6 ppm")
+            line = f.readline()
+            while line.startswith(b"#"):
+                line = f.readline()
+            w, h = map(int, line.split())
+            f.readline()  # maxval
+            px = f.read(w * h * 3)
+    except (OSError, ValueError, IndexError) as e:
+        failures.append(f"browser screendump unreadable: {e}")
+        return
+    if (w, h) != (1024, 768):
+        failures.append(
+            f"browser screendump is {w}x{h}, expected 1024x768 "
+            "(graphics mode not active?)")
+        return
+    white = dark = 0
+    for y in range(40, 300, 4):  # content area below the 24px top bar
+        for x in range(8, w - 8, 4):
+            off = (y * w + x) * 3
+            r, g, b = px[off], px[off + 1], px[off + 2]
+            if r > 200 and g > 200 and b > 200:
+                white += 1
+            elif r < 100 and g < 100 and b < 100:
+                dark += 1
+    if white < 1000:
+        failures.append(f"browser page background not white ({white} samples)")
+    if dark < 20:
+        failures.append(f"no rendered text found on the browser page ({dark} dark samples)")
 
 
 # TLS servers on host loopback; the guest reaches them as 10.0.2.2:<port>
@@ -208,6 +249,48 @@ def main():
             "https -k insecure mode",
         )
 
+        # The browser: fetch + HTML layout on the framebuffer, driven blind
+        # via sendkey and traced through its serial markers.
+        sh.type_line("browser 10.0.2.100/index.html")
+        if sh.wait_for("browser: loaded http://10.0.2.100/index.html status 200",
+                       "browser index load"):
+            sh.wait_for("browser: title NOS Browser Test", "browser title parse")
+            time.sleep(1.0)  # let the first frame hit the framebuffer
+            ppm = os.path.join(REPO, "tests", "browser_screen.ppm")
+            if os.path.exists(ppm):
+                os.remove(ppm)
+            sh.monitor("screendump " + ppm)
+            deadline = time.time() + 10
+            while time.time() < deadline and not (
+                os.path.exists(ppm) and os.path.getsize(ppm) > 0
+            ):
+                time.sleep(0.2)
+            check_browser_screendump(ppm)
+
+            # Follow link [1] by typing its number.
+            sh.key("1")
+            sh.key("ret")
+            sh.wait_for("browser: loaded http://10.0.2.100/page2.html status 200",
+                        "browser link follow")
+            sh.wait_for("browser: title Page Two", "browser page2 title")
+
+            # History back re-fetches the index.
+            sh.key("b")
+            sh.wait_for("browser: loaded http://10.0.2.100/index.html status 200",
+                        "browser back")
+
+            # URL prompt, through a 302 (also exercises Location resolution).
+            sh.key("g")
+            sh.type_line("10.0.2.100/redir")
+            sh.wait_for("browser: redirect http://10.0.2.100/page2.html",
+                        "browser redirect resolve")
+            sh.wait_for("browser: loaded http://10.0.2.100/page2.html status 200",
+                        "browser redirect load")
+
+            sh.key("q")
+            sh.wait_for("browser: quit", "browser quit")
+            sh.wait_for("nsh$", "prompt after browser")
+
         if "panic:" in sh.serial():
             failures.append("kernel panicked (see serial log)")
     finally:
@@ -222,7 +305,8 @@ def main():
         return 1
     print("PASS (rtl8139 probe, ARP, TCP handshake, HTTP GET, multi-segment "
           "receive, socket-in-pipeline, reconnect, TLS handshake, x509 "
-          "verification, untrusted rejection, -k insecure mode)")
+          "verification, untrusted rejection, -k insecure mode, browser "
+          "load/render/links/back/redirect)")
     return 0
 
 

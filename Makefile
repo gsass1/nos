@@ -20,7 +20,7 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr initrd/wget
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr initrd/wget initrd/browser
 OBJ=boot/boot.o \
 	drivers/keyboard.o \
 	drivers/mouse.o \
@@ -54,7 +54,8 @@ kernel/task.o \
 kernel/tcp.o \
 kernel/vfs.o \
 kernel/vga.o \
-kernel/vsprintf.o
+kernel/vsprintf.o \
+kernel/wsurf.o
 
 # BearSSL (third_party/bearssl, git submodule), built for userland against the
 # freestanding shim libc in user/libc. The x86 SIMD implementations are
@@ -197,6 +198,9 @@ kernel/vga.o: kernel/vga.c
 kernel/vsprintf.o: kernel/vsprintf.c
 	$(CC) -c kernel/vsprintf.c -o kernel/vsprintf.o $(CFLAGS)
 
+kernel/wsurf.o: kernel/wsurf.c
+	$(CC) -c kernel/wsurf.c -o kernel/wsurf.o $(CFLAGS)
+
 $(BIN): $(OBJ)
 	$(CC) -T linker.ld -o $(BIN) $(CFLAGS) $(OBJ) $(LFLAGS)
 
@@ -271,11 +275,17 @@ initrd/wget: user/wget.c user/trust_anchors.h user/ulib.h user/user.ld include/s
 	$(CC) -c user/wget.c -o user/wget.o $(CFLAGS) -I$(BEARSSL_DIR)/inc
 	$(LD) -T user/user.ld user/wget.o user/libc/libc.o -o initrd/wget $(BEARSSL_LIB)
 
+# browser renders HTML on the framebuffer; it fetches like wget, so it links
+# BearSSL and the shim libc the same way.
+initrd/browser: user/browser.c user/gfx.h user/trust_anchors.h user/ulib.h user/user.ld include/syscall.h user/libc/libc.o $(BEARSSL_LIB)
+	$(CC) -c user/browser.c -o user/browser.o $(CFLAGS) -I$(BEARSSL_DIR)/inc
+	$(LD) -T user/user.ld user/browser.o user/libc/libc.o -o initrd/browser $(BEARSSL_LIB)
+
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr wget
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr wget browser
 
 initrd: $(INITRD)
 

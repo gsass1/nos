@@ -66,7 +66,9 @@ qemu-system-i386 -kernel kernel.elf -initrd initrd/initrd.tar \
 - `kernel/` — `task.c` (scheduler, exit/reap), `elf.c` (loader + argv), `syscall.c`
   (dispatcher), `paging.c`/`kmalloc.c` (MM), `gdt.c` (GDT+TSS), `idt.c`, `interrupt.S`
   (all entry stubs), `isr.c` (fault handlers), `initrd.c` (tar VFS), `vga.c`,
-  `net.c` (eth/ARP/IPv4/UDP/DNS), `tcp.c` (client TCP); `drivers/rtl8139.c` (NIC),
+  `net.c` (eth/ARP/IPv4/UDP/DNS), `tcp.c` (client TCP), `fb.c` (BGA display +
+  single-owner arbitration), `wsurf.c` (window surfaces: shared pixel buffers +
+  event queues for wm clients); `drivers/rtl8139.c` (NIC),
   `drivers/rtc.c` (CMOS wall clock for SYS_TIME)
 - `third_party/bearssl/` — BearSSL (MIT) as a git submodule (run
   `git submodule update --init` after clone), cross-compiled into
@@ -104,6 +106,14 @@ qemu-system-i386 -kernel kernel.elf -initrd initrd/initrd.tar \
   is reported, check whether the shell still answers on serial before assuming a lock.
 - `wait` returns the child's exit status from a 32-entry ring buffer; statuses of
   long-dead pids read as 0.
+- The display is single-owner: `SYS_FBMAP` claims it (wm, or a fullscreen app from
+  the plain shell); a second claimant gets -1 and should fall back to `SYS_WCREATE`,
+  which yields an offscreen surface wm composites as a window (X11-style; browser
+  does this). Both the fb claim and any surface mappings are torn down in the
+  exit()/task_kill() **cli sections** next to the fd-table close -- NOT after the
+  sti: code between the dying task's unlink and task_switch() is abandoned if the
+  timer preempts. Surface pixels are kernel BSS aliased into user space; skipping
+  the unmap would let free_directory push kernel frames into the frame allocator.
 - Pipe ends and sockets are the refcounted fd types: duplicate via `file_addref`,
   drop via `file_close`. `exit()`/`task_kill()` close the dying task's whole fd
   table -- that, not the reaper, is what unblocks a peer waiting on the far end

@@ -5,6 +5,7 @@
 #include <io.h>
 #include <kernel.h>
 #include <pci.h>
+#include <vga.h>
 
 MODULE("FB  ");
 
@@ -162,6 +163,48 @@ int fb_present(void)
     return present;
 }
 
+// The display is single-owner: two tasks blitting full frames would fight
+// over the screen (e.g. a fullscreen app launched from a wm terminal, each
+// overwriting the other's frames). Ownership is taken by SYS_FBMAP and given
+// back by SYS_FBOFF or task death -- the death hook also restores text mode,
+// so a crash in graphics mode can't leave the console invisible.
+static int fb_owner = -1; // task id, -1 = free
+
+int fb_claim(int task_id)
+{
+    if (fb_owner != -1 && fb_owner != task_id) {
+        return -1;
+    }
+    fb_owner = task_id;
+    return 0;
+}
+
+int fb_owned_by(int task_id)
+{
+    return fb_owner == task_id;
+}
+
+void fb_release(int task_id)
+{
+    if (fb_owner == task_id) {
+        fb_owner = -1;
+    }
+}
+
+// The death hook. Runs inside exit()/task_kill()'s cli section: it MUST
+// happen there, not after the dying task leaves the ready queue with
+// interrupts back on -- code in that window is abandoned if the timer
+// preempts, and the display would stay claimed by a dead pid forever.
+void fb_task_exit(int task_id)
+{
+    if (fb_owner != task_id) {
+        return;
+    }
+    fb_owner = -1;
+    fb_disable();
+    vga_clear();
+}
+
 // The BIOS 8x16 text font saved at init: 256 glyphs, 32 bytes each (rows 0-15
 // used). Userspace text rendering fetches it via SYS_FONT.
 const uint8_t *fb_font_data(void)
@@ -195,8 +238,13 @@ void fb_disable(void)
     }
     // Keep the register dance atomic: a concurrent console print while the
     // VRAM window is remapped for the font copy would scribble on plane data.
-    asm volatile("cli");
+    // Save/restore EFLAGS rather than a blind sti -- task death calls this
+    // from inside exit()/task_kill() cli sections, which must stay closed.
+    uint32_t flags;
+    asm volatile("pushf; pop %0; cli" : "=r"(flags));
     bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
     vga_restore_text_mode();
-    asm volatile("sti");
+    if (flags & 0x200) {
+        asm volatile("sti");
+    }
 }

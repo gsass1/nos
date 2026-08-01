@@ -1,10 +1,11 @@
 // fbtest -- framebuffer smoke test. Maps the linear framebuffer, draws a
 // deterministic four-quadrant pattern (red/green/blue/white), holds it long
 // enough for the test harness to screendump and check pixel colors, then
-// returns the display to text mode.
+// returns the display to text mode. "fbtest crash" instead faults while
+// holding the display, to exercise the kernel's restore-on-death path.
 #include "ulib.h"
 
-void _start(void)
+void _start(int argc, char **argv)
 {
     struct fb_info info;
     if (fbinfo(&info) != 0) {
@@ -30,6 +31,9 @@ void _start(void)
     }
 
     put("fbtest: pattern drawn\n");
+    if (argc > 1 && streq(argv[1], "crash")) {
+        *(volatile int *)0 = 1; // die owning the display; kernel must restore
+    }
     sleep(3000); // window for the harness (or a human) to look at the screen
     fboff();
     put("fbtest: done\n");

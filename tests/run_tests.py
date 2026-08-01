@@ -141,6 +141,32 @@ class Shell:
             self.proc.kill()
 
 
+def check_surface_window(path):
+    """The browser's surface window sits at (60,40), body at (61,64) sized
+    780x540: mostly white page with dark rendered text, on the teal desktop."""
+    try:
+        w, h, px = read_ppm(path)
+    except (OSError, ValueError, IndexError) as e:
+        failures.append(f"surface screendump unreadable: {e}")
+        return
+    if (w, h) != (1024, 768):
+        failures.append(f"surface screendump is {w}x{h}, expected 1024x768")
+        return
+    white = dark = 0
+    for y in range(80, 300, 4):
+        for x in range(70, 830, 4):
+            off = (y * w + x) * 3
+            r, g, b = px[off], px[off + 1], px[off + 2]
+            if r > 200 and g > 200 and b > 200:
+                white += 1
+            elif r < 100 and g < 100 and b < 100:
+                dark += 1
+    if white < 1000:
+        failures.append(f"surface window body not composited ({white} white samples)")
+    if dark < 20:
+        failures.append(f"no client text visible in the surface window ({dark} dark samples)")
+
+
 def read_ppm(path):
     """Parse a binary (P6) PPM into (width, height, pixel_bytes)."""
     with open(path, "rb") as f:
@@ -324,6 +350,28 @@ def main():
             sh.wait_for("fbtest: done", "fbtest back to text mode")
             sh.wait_for("nsh$", "prompt after fbtest")
 
+        # Display ownership: the two pipeline stages run concurrently and
+        # both want the framebuffer; exactly one may get it. The loser's
+        # stdout may be swallowed by the pipe (stage 1 writes into it), so
+        # assert on the shell's exit-status report instead: the winner exits
+        # 0 silently, the loser's failed fbmap exits 1 -- exactly once.
+        before = sh.serial().count("[exit status 1]")
+        sh.run("fbtest | fbtest", ["[exit status 1]"], "fb single-owner")
+        delta = sh.serial().count("[exit status 1]") - before
+        if delta != 1:
+            failures.append(
+                f"fb single-owner: expected exactly one denied fbmap, got {delta}")
+
+        # Dying while owning the display: the kernel must give the fb back
+        # and restore text mode even though the task never called fboff --
+        # otherwise a crashed graphics app leaves the console invisible.
+        sh.run("fbtest crash",
+               ["fbtest: pattern drawn", "killed: page fault", "[exit status -1]"],
+               "fb restore on crash")
+        rows = sh.screen_rows()
+        if not any("nsh$" in row for row in rows):
+            failures.append("text mode not restored after a crash in graphics mode")
+
         # Window manager: a full scripted desktop session. Initial layout:
         # win1 "welcome" (140,120,400x300) unfocused (gray title), win2
         # "notes" (420,260,360x240) focused (navy title). The cursor position
@@ -461,6 +509,37 @@ def main():
             click()
             sh.wait_for("wm: killed pid", "unresponsive shell was killed")
 
+            # Window surfaces: a graphics client under wm renders into its
+            # own offscreen buffer (SYS_WCREATE) which wm composites as a
+            # window and routes input to. Launch the browser from a fresh
+            # terminal; it must window itself instead of grabbing the fb.
+            mouse_to(30, 752)
+            click()
+            mouse_to(80, 672)
+            click()
+            sh.wait_for("nsh - NOS userspace shell", "surface-test terminal")
+            for k in "browser":
+                sh.monitor("sendkey " + k)
+                time.sleep(0.15)
+            sh.monitor("sendkey ret")
+            if sh.wait_for("wm: surface 'browser' 780x540", "browser surface"):
+                time.sleep(1.5)  # first composited frame
+                sppm = os.path.join(REPO, "tests", "surface.ppm")
+                if os.path.exists(sppm):
+                    os.remove(sppm)
+                sh.monitor("screendump " + sppm)
+                deadline = time.time() + 10
+                while time.time() < deadline and not (
+                    os.path.exists(sppm) and os.path.getsize(sppm) > 0
+                ):
+                    time.sleep(0.2)
+                check_surface_window(sppm)
+
+                # The surface window has focus: 'q' quits the browser, wm
+                # notices the client died and removes the window.
+                sh.monitor("sendkey q")
+                sh.wait_for("wm: surface closed", "browser window closed")
+
             sh.monitor("sendkey esc")
             sh.wait_for("wm: exit", "wm exits to shell")
             sh.wait_for("nsh$", "prompt after wm")
@@ -491,7 +570,7 @@ def main():
         return 1
     print("PASS (boot, ls, exec/wait, argv, file io, sbrk, pipes, redirects, "
           "error paths, fault isolation, hostile pointers, shift keys, mouse, "
-          "framebuffer, vga screen)")
+          "framebuffer, fb ownership, window surfaces, vga screen)")
     return 0
 
 
