@@ -311,16 +311,29 @@ static uint32_t ext2_alloc_block(struct ext2_mount *m)
             }
             bm[i / 8] |= (1 << (i % 8));
             int wr = ext2_write_block(m, m->gd.bg_block_bitmap, bm);
-            kfree(bm);
-            if (wr < 0) return 0;
+            if (wr < 0) {
+                kfree(bm);
+                return 0;
+            }
 
             // Zero the newly allocated block.
             uint8_t *zero = kmalloc(m->block_size);
-            if (!zero) return 0;
+            if (!zero) {
+                bm[i / 8] &= ~(1 << (i % 8));
+                ext2_write_block(m, m->gd.bg_block_bitmap, bm);
+                kfree(bm);
+                return 0;
+            }
             memset(zero, 0, m->block_size);
             int zr = ext2_write_block(m, blk, zero);
             kfree(zero);
-            if (zr < 0) return 0;
+            if (zr < 0) {
+                bm[i / 8] &= ~(1 << (i % 8));
+                ext2_write_block(m, m->gd.bg_block_bitmap, bm);
+                kfree(bm);
+                return 0;
+            }
+            kfree(bm);
 
             m->sb.s_free_blocks_count--;
             m->gd.bg_free_blocks_count--;
