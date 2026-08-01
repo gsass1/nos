@@ -6,7 +6,8 @@
 #define LOGLEVEL_DEFAULT 0
 #define LOGLEVEL_DEBUG 1
 
-#define MODULE(X) static const char *__module_name = X;
+// Not every function in a module logs, so the name may go unreferenced.
+#define MODULE(X) static const char *__module_name __attribute__((unused)) = X;
 
 #define mprintf(X, ...) __mprintf(X, __module_name, __VA_ARGS__);
 

@@ -1,10 +1,19 @@
-AS=i686-elf-as
+# Cross toolchain. TOOLPREFIX?= so the environment/CI can point at a different
+# prefix; `make CC=... AS=...` on the command line also overrides (and `?=`
+# would NOT work for CC/AS/LD -- make predefines those to host tools).
+TOOLPREFIX?=i686-elf-
+AS=$(TOOLPREFIX)as
 AFLAGS=-g
-CC=i686-elf-gcc
-LD=i686-elf-ld
+CC=$(TOOLPREFIX)gcc
+LD=$(TOOLPREFIX)ld
 CFLAGS=-I./include/ -std=gnu99 -ffreestanding -nostdlib -g -Wall -Wextra
 LFLAGS=-lgcc
-NM=i686-elf-nm
+NM=$(TOOLPREFIX)nm
+
+# CI builds with `make WERROR=1`: the tree is warning-clean and must stay so.
+ifeq ($(WERROR),1)
+CFLAGS+=-Werror
+endif
 BIN=kernel.elf
 ISO=gianos.iso
 INITRD=initrd/initrd.tar
@@ -145,6 +154,11 @@ initrd: $(INITRD)
 # (no GRUB/ISO needed). Serial (com1) is routed to stdio; Ctrl-A X quits.
 run: $(BIN) $(INITRD)
 	qemu-system-i386 -kernel $(BIN) -initrd $(INITRD) -serial stdio
+
+# Boot/integration tests: drives the shell in headless QEMU and asserts on
+# serial output and the VGA screen. See tests/run_tests.py.
+test: $(BIN) $(INITRD)
+	python3 tests/run_tests.py
 
 clean:
 	rm -f $(OBJ)

@@ -24,12 +24,7 @@ MODULE("PIC ");
 
 void pic_init(void)
 {
-    uint8_t a1, a2;
-
     mprintf(LOGLEVEL_DEFAULT, "Initializing PIC\n");
-
-    a1 = inb(PIC1_DATA);
-    a2 = inb(PIC2_DATA);
 
     // Init ICW1
     outb(PIC1_COMMAND, ICW1_INIT + ICW1_ICW4);   // Master PIC

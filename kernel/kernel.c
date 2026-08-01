@@ -192,7 +192,6 @@ static void show_stack_trace(unsigned int max_frames)
         if(eip == 0)
             break;
         ebp = (unsigned int *)ebp[0];
-        unsigned int *args = &ebp[2];
         kprintf("    0x%08x [%s]\n", eip, sym_get(eip));
     }
 }
@@ -225,10 +224,9 @@ void panic(const char *fmt, ...)
     halt();
 }
 
-static struct mutex mprintf_mtx = MUTEX_INIT;
-
 void __mprintf(uint8_t type, const char *fmt, ...)
 {
+    (void)type; // log levels are not filtered yet
     static char temp[1024];
 
     va_list ap;

@@ -15,14 +15,22 @@ Cross toolchain: `i686-elf-gcc` / `i686-elf-as` / `i686-elf-ld` / `i686-elf-nm` 
 make            # kernel.elf
 make initrd     # initrd/initrd.tar (symtable + user programs; ustar format required)
 make run        # QEMU with -serial stdio and a display window
+make test       # boot/integration tests (tests/run_tests.py) -- run before every commit
 ```
 
-Freestanding C99, `-Wall -Wextra`. Files `kernel.c`, `string.c`, `vfs.c`, `vsprintf.c`
-have pre-existing warnings; don't add new ones elsewhere.
+Freestanding C99, `-Wall -Wextra`. The tree is warning-clean and CI builds with
+`make WERROR=1`; do not introduce warnings. CI (`.github/workflows/ci.yml`) runs
+build + initrd + `make test` on every PR; a PR is not done until `make test` passes.
 
 ## Verifying changes (do this before claiming something works)
 
-Headless QEMU, driven through the monitor; serial output goes to a log file:
+`make test` covers boot, ls, exec/wait, argv, file io, sbrk, error paths, fault
+isolation, and that the prompt is on the visible VGA screen. Extend
+`tests/run_tests.py` when adding user-visible behaviour (it polls the serial log
+for markers -- no fixed sleeps -- and can dump the screen via the monitor).
+
+For ad-hoc poking beyond the suite -- headless QEMU, driven through the monitor;
+serial output goes to a log file:
 
 ```sh
 (sleep 3; echo "sendkey l"; sleep 0.3; echo "sendkey s"; sleep 0.3; echo "sendkey ret"; \

@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cross toolchain and QEMU
+        run: |
+          echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          brew install i686-elf-gcc i686-elf-binutils
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86
+
+      - name: Build kernel (warnings are errors)
+        run: make WERROR=1
+
+      - name: Build initrd + user programs
+        run: make initrd WERROR=1
+
+      - name: Boot and integration tests
+        run: make test
+
+      - name: Upload serial log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serial-log
+          path: tests/serial.log
+          if-no-files-found: ignore

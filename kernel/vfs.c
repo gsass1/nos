@@ -27,6 +27,8 @@ uint32_t vfs_write(struct fs_node *node, uint32_t offset, uint32_t size, uint8_t
 
 void vfs_open(struct fs_node *node, uint8_t read, uint8_t write)
 {
+    (void)read;  // access-mode flags: nothing enforces them yet
+    (void)write;
     if(node->open != 0) {
         node->open(node);
     }
