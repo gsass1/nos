@@ -3,6 +3,7 @@
 #include "ulib.h"
 
 #define MAX_ARGS 8
+#define MAX_STAGES 4
 
 static void cmd_ls(void)
 {
@@ -15,55 +16,171 @@ static void cmd_ls(void)
     }
 }
 
-static void run(char *line)
+// Split one pipeline stage into argv words in place, peeling off a "< file"
+// input redirection (the '<' must be its own word). Returns argc, or -1 if
+// '<' has no filename after it.
+static int parse_stage(char *s, char *argv[], char **infile)
 {
-    // Split the line into words in place; argv is NULL-terminated for exec.
-    char *argv[MAX_ARGS + 1];
-    int argc = 0;
-    char *p = line;
-    while (*p && argc < MAX_ARGS) {
-        while (*p == ' ') {
-            *p++ = '\0';
+    char *words[MAX_ARGS + 2]; // room for "<" and its filename besides argv
+    int n = 0;
+    while (*s && n < MAX_ARGS + 2) {
+        while (*s == ' ') {
+            *s++ = '\0';
         }
-        if (!*p) {
+        if (!*s) {
             break;
         }
-        argv[argc++] = p;
-        while (*p && *p != ' ') {
-            p++;
+        words[n++] = s;
+        while (*s && *s != ' ') {
+            s++;
+        }
+    }
+
+    int argc = 0;
+    *infile = 0;
+    for (int i = 0; i < n; i++) {
+        if (streq(words[i], "<")) {
+            if (i + 1 >= n) {
+                return -1;
+            }
+            *infile = words[++i];
+        } else if (argc < MAX_ARGS) {
+            argv[argc++] = words[i];
         }
     }
     argv[argc] = 0;
-    if (argc == 0) {
-        return;
+    return argc;
+}
+
+// Run "cmd [args] [< file] | cmd ..." -- every stage is a program from the
+// initrd (builtins can't sit in a pipeline). Adjacent stages are connected
+// by pipes wired into the children with exec2; the shell closes its own copy
+// of each end right after the spawn, so a stage's EOF arrives as soon as the
+// stage before it exits (or dies).
+static void run_pipeline(char *line)
+{
+    char *stages[MAX_STAGES];
+    int nstages = 0;
+    stages[nstages++] = line;
+    for (char *p = line; *p; p++) {
+        if (*p == '|') {
+            *p = '\0';
+            if (nstages == MAX_STAGES) {
+                put("nsh: too many pipeline stages\n");
+                return;
+            }
+            stages[nstages++] = p + 1;
+        }
     }
 
-    if (streq(argv[0], "help")) {
-        put("builtins: help  ls  clear  exit\n");
-        put("anything else runs a program from the initrd (try: cat symtable)\n");
-    } else if (streq(argv[0], "ls")) {
-        cmd_ls();
-    } else if (streq(argv[0], "clear")) {
-        sys0(SYS_CLEAR);
-    } else if (streq(argv[0], "exit")) {
-        put("bye!\n");
-        exit(0);
-    } else {
-        // Not a builtin: run it as a program from the initrd (passing the
-        // remaining words as its argv) and wait for it to finish.
-        int pid = exec(argv[0], argv);
+    int pids[MAX_STAGES];
+    int npids = 0;
+    int prevr = -1; // read end of the previous stage's output pipe
+    for (int i = 0; i < nstages; i++) {
+        char *argv[MAX_ARGS + 1];
+        char *infile;
+        int argc = parse_stage(stages[i], argv, &infile);
+        if (argc <= 0) {
+            put(argc < 0 ? "nsh: '<' needs a filename\n"
+                         : "nsh: empty pipeline stage\n");
+            break;
+        }
+
+        int in = prevr; // this stage consumes the previous pipe's read end
+        prevr = -1;
+        if (infile) {
+            int ffd = open(infile);
+            if (ffd < 0) {
+                put("nsh: cannot open ");
+                put(infile);
+                put("\n");
+                if (in >= 0) {
+                    close(in);
+                }
+                break;
+            }
+            if (in >= 0) {
+                close(in); // "< file" wins over the incoming pipe
+            }
+            in = ffd;
+        }
+
+        int p[2] = { -1, -1 };
+        if (i < nstages - 1 && pipe(p) < 0) {
+            put("nsh: out of fds\n");
+            if (in >= 0) {
+                close(in);
+            }
+            break;
+        }
+
+        int fds[3] = { in, p[1], -1 }; // -1 entries inherit the shell's own
+        int pid = exec2(argv[0], argv, fds);
+        // The child now holds its own references; drop ours so the pipe
+        // sees EOF once the stages themselves exit.
+        if (in >= 0) {
+            close(in);
+        }
+        if (p[1] >= 0) {
+            close(p[1]);
+        }
+        prevr = p[0];
         if (pid < 0) {
             put("unknown command: ");
             put(argv[0]);
             put("\n");
-        } else {
-            int status = wait(pid);
-            if (status != 0) {
-                put("[exit status ");
-                puti(status);
-                put("]\n");
-            }
+            break;
         }
+        pids[npids++] = pid;
+    }
+    if (prevr >= 0) {
+        close(prevr); // a failed stage orphaned the last pipe; unstick writers
+    }
+
+    for (int i = 0; i < npids; i++) {
+        int status = wait(pids[i]);
+        if (status != 0) {
+            put("[exit status ");
+            puti(status);
+            put("]\n");
+        }
+    }
+}
+
+// True if the first word of line is exactly w.
+static int firstword(const char *line, const char *w)
+{
+    int i = 0;
+    while (w[i] && line[i] == w[i]) {
+        i++;
+    }
+    return !w[i] && (line[i] == ' ' || line[i] == '\0');
+}
+
+static void run(char *line)
+{
+    while (*line == ' ') {
+        line++;
+    }
+    if (!*line) {
+        return;
+    }
+
+    // Builtins run in the shell itself and never join a pipeline; everything
+    // else (single commands, redirects, pipelines) goes to run_pipeline.
+    if (firstword(line, "help")) {
+        put("builtins: help  ls  clear  exit\n");
+        put("anything else runs initrd programs, with | and < plumbing\n");
+        put("(try: cat symtable | upper)\n");
+    } else if (firstword(line, "ls")) {
+        cmd_ls();
+    } else if (firstword(line, "clear")) {
+        sys0(SYS_CLEAR);
+    } else if (firstword(line, "exit")) {
+        put("bye!\n");
+        exit(0);
+    } else {
+        run_pipeline(line);
     }
 }
 

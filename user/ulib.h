@@ -45,6 +45,16 @@ static inline int exec(const char *path, char *const argv[])
     return sys3(SYS_EXEC, (int)path, (int)argv, 0);
 }
 
+// fds[0] reads what fds[1] writes; both are fresh fds of the caller.
+static inline int pipe(int fds[2]) { return sys1(SYS_PIPE, (int)fds); }
+
+// exec with explicit stdio: the child's fd i becomes a copy of the caller's
+// fd fds[i], or is inherited as in exec() where fds[i] is -1.
+static inline int exec2(const char *path, char *const argv[], const int fds[3])
+{
+    return sys3(SYS_EXEC2, (int)path, (int)argv, (int)fds);
+}
+
 // Grow the heap by incr bytes; returns the start of the new memory,
 // or (void *)-1 on failure.
 static inline void *sbrk(int incr)

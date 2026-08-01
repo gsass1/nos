@@ -25,7 +25,7 @@ INITRD = os.path.join(REPO, "initrd", "initrd.tar")
 WAIT_TIMEOUT = 30  # seconds per marker; CI runners can be slow
 
 # QEMU sendkey names for the characters the tests type.
-KEYMAP = {" ": "spc"}
+KEYMAP = {" ": "spc", "|": "shift-backslash", "<": "shift-comma"}
 for _c in "abcdefghijklmnopqrstuvwxyz0123456789":
     KEYMAP[_c] = _c
 for _c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
@@ -239,6 +239,24 @@ def main():
         # from both the first and a later read() chunk.
         sh.run("cat symtable", ["kernel_base", "kernel_end"], "cat symtable")
 
+        # Pipes: hello's stdout is a pipe feeding upper, so only the
+        # uppercased text reaches the terminal; the prompt returning proves
+        # EOF propagated when the writer exited.
+        sh.run("hello | upper", ["HELLO FROM A LOADED ELF PROGRAM"], "pipeline")
+
+        # Three stages, and < redirection reading an initrd file to EOF.
+        sh.run("cat symtable | upper | upper", ["KERNEL_BASE"], "3-stage pipeline")
+        sh.run("upper < symtable", ["KERNEL_END"], "input redirection")
+
+        # A stage dying mid-pipeline: crash is killed by its page fault, the
+        # kill path closes its pipe write end, and upper sees EOF instead of
+        # hanging -- the prompt coming back is the real assertion.
+        sh.run(
+            "crash | upper",
+            ["killed: page fault", "[exit status -1]"],
+            "pipeline EOF on killed writer",
+        )
+
         # Error paths report distinct messages and nonzero exit statuses.
         sh.run("cat nope", ["not found", "[exit status 1]"], "cat missing file")
         sh.run("cat", ["usage: cat", "[exit status 1]"], "cat usage")
@@ -270,6 +288,11 @@ def main():
             "crash isolation",
         )
         sh.run("hello", ["Hello from a loaded ELF program"], "shell alive after crash")
+
+        # Hostile user pointers: every syscall must reject unmapped, kernel,
+        # and out-of-window pointers with -1 instead of faulting in ring 0
+        # (a panic) or reading/writing kernel memory on the caller's behalf.
+        sh.run("badptr", ["badptr: all hostile pointers rejected"], "hostile pointers")
 
         # Framebuffer: fbtest switches to 1024x768x32 graphics, draws four
         # colored quadrants and holds them; screendump the emulated display
@@ -454,8 +477,9 @@ def main():
         for f in failures:
             print("  - " + f)
         return 1
-    print("PASS (boot, ls, exec/wait, argv, file io, sbrk, error paths, "
-          "fault isolation, shift keys, mouse, framebuffer, vga screen)")
+    print("PASS (boot, ls, exec/wait, argv, file io, sbrk, pipes, redirects, "
+          "error paths, fault isolation, hostile pointers, shift keys, mouse, "
+          "framebuffer, vga screen)")
     return 0
 
 

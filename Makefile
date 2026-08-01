@@ -20,7 +20,7 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/fbtest initrd/mtest initrd/wm initrd/spin
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr
 OBJ=boot/boot.o \
 drivers/keyboard.o \
 drivers/mouse.o \
@@ -41,6 +41,7 @@ kernel/mutex.o \
 kernel/paging.o \
 kernel/pci.o \
 kernel/pic.o \
+kernel/pipe.o \
 kernel/pit.o \
 kernel/string.o \
 kernel/syscall.o \
@@ -111,6 +112,9 @@ kernel/pci.o: kernel/pci.c
 kernel/pic.o: kernel/pic.c
 	$(CC) -c kernel/pic.c -o kernel/pic.o $(CFLAGS)
 
+kernel/pipe.o: kernel/pipe.c
+	$(CC) -c kernel/pipe.c -o kernel/pipe.o $(CFLAGS)
+
 kernel/pit.o: kernel/pit.c
 	$(CC) -c kernel/pit.c -o kernel/pit.o $(CFLAGS)
 
@@ -174,11 +178,19 @@ initrd/spin: user/spin.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/spin.c -o user/spin.o $(CFLAGS)
 	$(LD) -T user/user.ld user/spin.o -o initrd/spin
 
+initrd/upper: user/upper.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/upper.c -o user/upper.o $(CFLAGS)
+	$(LD) -T user/user.ld user/upper.o -o initrd/upper
+
+initrd/badptr: user/badptr.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/badptr.c -o user/badptr.o $(CFLAGS)
+	$(LD) -T user/user.ld user/badptr.o -o initrd/badptr
+
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat fbtest mtest wm spin
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat fbtest mtest wm spin upper badptr
 
 initrd: $(INITRD)
 

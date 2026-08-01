@@ -30,6 +30,8 @@
 #define SYS_CSTAT   22  // cstat(cid)                  -> attached pid while alive, else 0
 #define SYS_CCLOSE  23  // cclose(cid)                 -> 0; frees the console slot
 #define SYS_KILL    24  // kill(pid)                   -> 0, or -1 if no such running task
+#define SYS_PIPE    25  // pipe(int fds[2])            -> 0; fds[0] = read end, fds[1] = write end
+#define SYS_EXEC2   26  // exec2(path, argv, int fds[3]) -> pid; child fd i = caller's fd fds[i], -1 = inherit
 
 // Returned by SYS_MOUSE: cursor position in framebuffer coordinates,
 // buttons bit0=left bit1=right bit2=middle.

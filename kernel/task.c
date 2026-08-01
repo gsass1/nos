@@ -1,6 +1,7 @@
 #include <elf.h>
 #include <gdt.h>
 #include <mm.h>
+#include <pipe.h>
 #include <string.h>
 #include <task.h>
 #include <kernel.h>
@@ -27,6 +28,35 @@ static uint32_t next_pid = 0;
 #define EXIT_RECORDS 32
 static struct { int pid; int code; } exit_records[EXIT_RECORDS];
 static int exit_record_next;
+
+void file_addref(struct file *f)
+{
+    if (f->type == FD_PIPE_R || f->type == FD_PIPE_W) {
+        pipe_addref(f->pipe, f->type == FD_PIPE_W);
+    }
+}
+
+void file_close(struct file *f)
+{
+    if (f->type == FD_PIPE_R || f->type == FD_PIPE_W) {
+        pipe_release(f->pipe, f->type == FD_PIPE_W);
+    }
+    f->type = FD_NONE;
+    f->node = 0;
+    f->pipe = 0;
+}
+
+// Drop every fd a dying task holds. This must happen when the task dies, not
+// at reap time: a peer blocked on the far end of a pipe only unblocks (EOF
+// for readers, error for writers) once these references are gone.
+static void close_all_files(struct task *t)
+{
+    for (int i = 0; i < TASK_MAX_FILES; i++) {
+        if (t->files[i].type != FD_NONE) {
+            file_close(&t->files[i]);
+        }
+    }
+}
 
 // Selects the next task to run. Called from assembly (both the timer IRQ and
 // the cooperative task_switch yield) with `esp` pointing at the outgoing task's
@@ -116,6 +146,9 @@ int spawn_task(const char *name, void *entry, struct page_directory *dir,
     memset(task->files, 0, sizeof(task->files));
     if (stdio) {
         memcpy(task->files, stdio, 3 * sizeof(struct file));
+        for (int i = 0; i < 3; i++) {
+            file_addref(&task->files[i]);
+        }
     } else {
         for (int i = 0; i < 3; i++) {
             task->files[i].type = FD_CONSOLE;
@@ -174,6 +207,8 @@ void exit(int code)
     if (current_task == ready_queue && current_task->next == 0) {
         panic("Cannot exit the last remaining task!\n");
     }
+
+    close_all_files((struct task *)current_task);
 
     exit_records[exit_record_next].pid = current_task->id;
     exit_records[exit_record_next].code = code;
@@ -268,6 +303,8 @@ int task_kill(int pid)
     // to the reaper. It is not running -- we are -- so its saved context just
     // dies with its stack.
     prev->next = t->next;
+
+    close_all_files(t);
 
     exit_records[exit_record_next].pid = t->id;
     exit_records[exit_record_next].code = -9;
