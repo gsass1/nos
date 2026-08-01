@@ -1,20 +1,11 @@
+#include <idt.h>
 #include <kernel.h>
 #include <stdint.h>
 #include <mm.h>
 #include <task.h>
 
-struct registers
+void isr_default_int(void)
 {
-    uint32_t ds;                  // Data segment selector
-    uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax; // Pushed by pusha.
-    uint32_t int_no, err_code;    // Interrupt number and error code (if applicable)
-    uint32_t eip, cs, eflags, useresp, ss; // Pushed by the processor automatically.
-};
-
-
-void isr_default_int(struct registers registers)
-{
-    //DPRINT("Unhandled interrupt: %d\n", registers.int_no);
 }
 
 void isr_reserved_int(void)
@@ -22,9 +13,23 @@ void isr_reserved_int(void)
     panic("Unhandled reserved interrupt\n");
 }
 
-void isr_exc_DIV0(void)
+// A fault raised while the CPU was in ring 3 is the program's fault, not the
+// kernel's: report it and kill just that task. Ring 0 faults are kernel bugs
+// and still panic. exit() never returns; the trap frame simply dies with the
+// task's kernel stack when the reaper frees it.
+static void fault_kill_user(struct fault_frame *f, const char *what)
 {
-    panic("Division by 0\n");
+    kprintf("%s (pid %d) killed: %s at eip 0x%08x\n",
+            getpname(), getpid(), what, f->eip);
+    exit();
+}
+
+void isr_exc_DIV0(struct fault_frame *f)
+{
+    if (f->cs & 3) {
+        fault_kill_user(f, "division by zero");
+    }
+    panic("Division by 0 (eip: 0x%08x)\n", f->eip);
 }
 
 void isr_exc_DEBUG(void)
@@ -86,9 +91,12 @@ void isr_exc_BOUNDS(void)
     panic("Bound interrupt\n"); // Will halt
 }
 
-void isr_exc_OPCODE(struct registers registers)
+void isr_exc_OPCODE(struct fault_frame *f)
 {
-    panic("Invalid opcode (eip: 0x%08x)\n", registers.eip); // Will halt
+    if (f->cs & 3) {
+        fault_kill_user(f, "invalid opcode");
+    }
+    panic("Invalid opcode (eip: 0x%08x)\n", f->eip); // Will halt
 }
 
 void isr_exc_DOUBLEF(void)
@@ -101,32 +109,26 @@ void isr_exc_STACKF(void)
     panic("Stack Fault\n"); // Will halt
 }
 
-void isr_exc_GP(void)
+void isr_exc_GP(struct fault_frame *f)
 {
-    uint32_t eip, error;
-    __asm__("   movl 60(%%ebp), %%eax   \n \
-            mov %%eax, %0       \n \
-        movl 56(%%ebp), %%eax   \n \
-            mov %%eax, %1"
-        : "=m"(eip), "=m"(error));
-    kprintf("GP fault, eip:0x%08x, error:0x%08x\n",eip,error);
-    panic("GP fault");
+    if (f->cs & 3) {
+        fault_kill_user(f, "general protection fault");
+    }
+    panic("GP fault (eip:0x%08x, error:0x%08x)\n", f->eip, f->err);
 }
 
-void isr_exc_PF(void)
+void isr_exc_PF(struct fault_frame *f)
 {
-    uint32_t faulting_addr, errorCode;
-    uint32_t eip;
+    uint32_t cr2;
+    asm volatile("mov %%cr2, %0" : "=r"(cr2));
 
-    asm("   movl 60(%%ebp), %%eax   \n \
-                    mov %%eax, %0       \n \
-                            mov %%cr2, %%eax    \n \
-                                    mov %%eax, %1       \n \
-                                            movl 56(%%ebp), %%eax   \n \
-                                                        mov %%eax, %2"
-                                                        : "=m"(eip), "=m"(faulting_addr), "=m"(errorCode));
-
-    panic("Page fault (pid:%d, eip:0x%08x, cr2:0x%08x, error:0x%08x)\n", getpid(), eip, faulting_addr, errorCode);
+    if (f->cs & 3) {
+        kprintf("%s (pid %d) killed: page fault at eip 0x%08x (addr 0x%08x, error 0x%08x)\n",
+                getpname(), getpid(), f->eip, cr2, f->err);
+        exit();
+    }
+    panic("Page fault (pid:%d, eip:0x%08x, cr2:0x%08x, error:0x%08x)\n",
+          getpid(), f->eip, cr2, f->err);
 }
 
 void isr_clock_int(void)

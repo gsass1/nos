@@ -1,3 +1,4 @@
+#include <gdt.h>
 #include <mm.h>
 #include <string.h>
 #include <task.h>
@@ -43,6 +44,12 @@ uint32_t schedule(uint32_t esp)
         asm volatile("mov %0, %%cr3" :: "r"(current_directory->phys_addr));
     }
 
+    // If the incoming task can run in ring 3, the next syscall/IRQ/fault it
+    // takes must land at the top of ITS kernel stack.
+    if (current_task->kstack_top) {
+        tss_set_esp0(current_task->kstack_top);
+    }
+
     return current_task->esp;
 }
 
@@ -59,6 +66,7 @@ void tasking_init(void)
     current_task->id = next_pid++;
     current_task->esp = 0;
     current_task->stack_mem = 0;
+    current_task->kstack_top = 0; // pure ring0 task, esp0 never used
     current_task->page_directory = current_directory;
     current_task->owns_dir = 0; // shares the boot address space; never reaped
     current_task->next = 0;
@@ -69,7 +77,8 @@ void tasking_init(void)
     asm volatile("sti");
 }
 
-int spawn_task(const char *name, void *entry, struct page_directory *dir)
+int spawn_task(const char *name, void *entry, struct page_directory *dir,
+               uint32_t user_esp)
 {
     mprintf(LOGLEVEL_DEBUG, "Spawning task %s with entry: 0x%08x\n", name, entry);
 
@@ -89,12 +98,23 @@ int spawn_task(const char *name, void *entry, struct page_directory *dir)
     const uint32_t stack_size = 0x4000; // 16KB kernel stack (headroom for nested IRQs/syscalls)
     uint8_t *stack_mem = kmalloc(stack_size);
     task->stack_mem = stack_mem;
+    task->kstack_top = user_esp ? (uint32_t)(stack_mem + stack_size) : 0;
 
     uint32_t *sp = (uint32_t *)(stack_mem + stack_size);
 
-    // iret frame (ring0 -> ring0: CPU pushes no ss/esp).
-    *--sp = 0x202;              // eflags: reserved bit 1 + IF set
-    *--sp = 0x08;              // cs (kernel code segment)
+    // Selectors: ring0 kernel segments, or the user segments (0x18/0x20) with
+    // RPL 3 for a ring 3 task.
+    uint32_t cs  = user_esp ? 0x1B : 0x08;
+    uint32_t seg = user_esp ? 0x23 : 0x10;
+
+    // iret frame. For ring0 -> ring0 the CPU pushes no ss/esp; for a ring 3
+    // task iret additionally pops ss:esp, switching to the user stack.
+    if (user_esp) {
+        *--sp = seg;            // ss (user data, RPL 3)
+        *--sp = user_esp;       // esp (user stack top)
+    }
+    *--sp = 0x202;              // eflags: reserved bit 1 + IF set (IOPL 0)
+    *--sp = cs;                 // cs
     *--sp = (uint32_t)entry;    // eip
     // pushad block (values are don't-cares; order matches popad).
     *--sp = 0;                  // eax
@@ -106,10 +126,10 @@ int spawn_task(const char *name, void *entry, struct page_directory *dir)
     *--sp = 0;                  // esi
     *--sp = 0;                  // edi
     // Segment registers, laid out so RESTORE_REGS pops gs,fs,es,ds in order.
-    *--sp = 0x10;              // ds
-    *--sp = 0x10;              // es
-    *--sp = 0x10;              // fs
-    *--sp = 0x10;              // gs
+    *--sp = seg;               // ds
+    *--sp = seg;               // es
+    *--sp = seg;               // fs
+    *--sp = seg;               // gs
 
     task->esp = (uint32_t)sp;
 

@@ -15,6 +15,11 @@ struct task
     // Base of the heap-allocated kernel stack (0 for the boot/kernel task,
     // which runs on the bootstrap stack from boot.S).
     void *stack_mem;
+    // One past the top of that kernel stack. Loaded into tss.esp0 whenever
+    // this task is scheduled, so a ring3 -> ring0 transition (syscall, IRQ,
+    // fault) lands on an empty kernel stack. 0 for the kernel task, which
+    // never runs in ring 3.
+    uint32_t kstack_top;
     struct page_directory *page_directory;
     int owns_dir; // if set, page_directory is freed when the task is reaped
     struct task *next;      // ready-queue link
@@ -24,8 +29,11 @@ struct task
 void tasking_init(void);
 
 // Create a runnable task that begins executing at `entry` in address space
-// `dir` (pass 0 to share the current directory).
-int spawn_task(const char *name, void *entry, struct page_directory *dir);
+// `dir` (pass 0 to share the current directory). If `user_esp` is non-zero the
+// task starts in ring 3 with that stack pointer; otherwise it is a ring 0
+// kernel thread.
+int spawn_task(const char *name, void *entry, struct page_directory *dir,
+               uint32_t user_esp);
 
 // Returns non-zero while a task with the given pid is still in the ready queue.
 int task_alive(int pid);

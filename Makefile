@@ -11,7 +11,7 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh
+USERPROGS=initrd/hello initrd/sh initrd/crash
 OBJ=boot/boot.o \
 drivers/keyboard.o \
 drivers/serial.o \
@@ -125,11 +125,15 @@ initrd/sh: user/sh.c user/user.ld include/syscall.h
 	$(CC) -c user/sh.c -o user/sh.o $(CFLAGS)
 	$(LD) -T user/user.ld user/sh.o -o initrd/sh
 
+initrd/crash: user/crash.c user/user.ld include/syscall.h
+	$(CC) -c user/crash.c -o user/crash.o $(CFLAGS)
+	$(LD) -T user/user.ld user/crash.o -o initrd/crash
+
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash
 
 initrd: $(INITRD)
 

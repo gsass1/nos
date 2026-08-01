@@ -139,20 +139,15 @@ void mm_paging_init(uint32_t mem_size)
     for (; i < heap_end; i += 0x1000)
         get_page(i, 1, kernel_directory);
 
-    // Identity map memory range to heap space
+    // Identity map everything up to the end of the heap, supervisor-only:
+    // ring 3 must not be able to read or write kernel code, the heap (which
+    // holds every task's kernel stack), or the VGA buffer. User program pages
+    // are mapped separately by elf_exec with the user bit set.
     i = 0;
     while(i < heap_end + 0x1000) {
-        alloc_frame(get_page(i, 1, kernel_directory), 0, 0);
+        alloc_frame(get_page(i, 1, kernel_directory), 1, 1);
         i += 0x1000;
     }
-
-    /*// Now allocate those pages we mapped earlier.
-    for (i = KHEAP_START; i < KHEAP_START+KHEAP_INITIAL_SIZE; i += 0x1000)
-        alloc_frame( get_page(i, 1, kernel_directory), 0, 0);*/
-
-    i = 0;
-    for (; i < heap_end; i += 0x1000)
-        alloc_frame(get_page(i, 1, kernel_directory), 0, 0);
 
     switch_page_directory(kernel_directory);
 

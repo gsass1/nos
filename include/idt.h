@@ -20,6 +20,19 @@ struct idt_ptr
    uint32_t base;                // The address of the first element in our idt_entry_t array.
 } __attribute__((packed));
 
+// Saved state handed to the #DE/#UD/#GP/#PF handlers by FAULT_STUB in
+// interrupt.S: the SAVE_REGS block, then the error code (a dummy 0 for
+// vectors whose fault pushes none), then the CPU's iret frame. useresp/ss
+// exist only when the fault came from ring 3 (check cs & 3).
+struct fault_frame
+{
+    uint32_t gs, fs, es, ds;
+    uint32_t edi, esi, ebp, esp_dummy, ebx, edx, ecx, eax;
+    uint32_t err;
+    uint32_t eip, cs, eflags;
+    uint32_t useresp, ss; // only valid if (cs & 3)
+};
+
 void idt_init(void);
 void idt_install_handler(uint8_t num, uint32_t base);
 

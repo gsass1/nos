@@ -40,6 +40,11 @@ struct elf32_phdr
 #define USER_VADDR_MIN 0x40000000U
 #define USER_VADDR_MAX 0x80000000U
 
+// Each process gets its own user-mode stack, mapped by elf_exec just below
+// this address (well above where the small program images end).
+#define USER_STACK_TOP  0x50000000U
+#define USER_STACK_SIZE 0x4000U // 16KB
+
 // Load an ELF32 program from the initrd, mapping its PT_LOAD segments, and
 // start it as a task. Returns the new task id, or -1 on failure.
 int elf_exec(const char *path);

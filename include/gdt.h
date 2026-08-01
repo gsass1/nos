@@ -19,6 +19,27 @@ struct gdt_ptr
 	uint32_t base;				// The address of the first gdt_entry_t struct.
 } __attribute__((packed));
 
+// 32-bit Task State Segment. We use it for exactly one thing: telling the CPU
+// which kernel stack (ss0:esp0) to switch to when an interrupt or syscall
+// arrives while the CPU is in ring 3. No hardware task switching.
+struct tss_entry
+{
+    uint32_t prev_tss;
+    uint32_t esp0;   // Kernel stack pointer loaded on a ring3 -> ring0 transition.
+    uint32_t ss0;    // Kernel stack segment (0x10).
+    uint32_t esp1, ss1, esp2, ss2;
+    uint32_t cr3, eip, eflags;
+    uint32_t eax, ecx, edx, ebx, esp, ebp, esi, edi;
+    uint32_t es, cs, ss, ds, fs, gs;
+    uint32_t ldt;
+    uint16_t trap;
+    uint16_t iomap_base;
+} __attribute__((packed));
+
 void gdt_init(void);
+
+// Point the TSS at the kernel stack to use for the NEXT ring3 -> ring0
+// transition. The scheduler calls this on every switch to a user task.
+void tss_set_esp0(uint32_t esp0);
 
 #endif

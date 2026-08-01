@@ -9,6 +9,7 @@
     push ebx
     mov bx,0x10
     mov ds,bx
+    mov es,bx       # entered from ring 3 these still hold user selectors
     pop ebx
 .endm
 
@@ -42,17 +43,33 @@ _asm_reserved_int:
 # code; their stubs pop it with `add esp,4` before iret. The other exception
 # stubs must NOT do that -- it would discard the return eip and iret into
 # garbage if their handler ever returned.
-_asm_exc_DIV0:
+#
+# The four faults a user program can realistically raise (#DE, #UD, #GP, #PF)
+# get a richer stub: the frame pointer is passed to the C handler so it can
+# tell ring 3 apart from ring 0 and kill just the offending task. Vectors
+# without a CPU error code push a dummy 0 first so all four frames share one
+# layout (struct fault_frame).
+.macro FAULT_STUB handler
     SAVE_REGS
-    call isr_exc_DIV0
+    push esp
+    call \handler
+    add esp,4
     RESTORE_REGS
+    add esp,4       # drop the (real or dummy) error code
     iret
+.endm
 
+_asm_exc_DIV0:
+    push 0          # no CPU error code for #DE; normalize the frame
+    FAULT_STUB isr_exc_DIV0
+
+# NB: isr_exc_DEBUG returns (it's a no-op), so this stub's frame must be
+# exact. A previous ";add esp,4" here was NOT a comment -- ';' separates
+# statements in gas -- so the add assembled and would have clobbered the frame.
 _asm_exc_DEBUG:
     SAVE_REGS
     call isr_exc_DEBUG
     RESTORE_REGS
-    ;add esp,4
     iret
 
 _asm_exc_BP:
@@ -125,10 +142,8 @@ _asm_exc_BOUNDS:
     iret
 
 _asm_exc_OPCODE:
-    SAVE_REGS
-    call isr_exc_OPCODE
-    RESTORE_REGS
-    iret
+    push 0          # no CPU error code for #UD; normalize the frame
+    FAULT_STUB isr_exc_OPCODE
 
 
 _asm_exc_DOUBLEF:
@@ -146,18 +161,10 @@ _asm_exc_STACKF:
     iret
 
 _asm_exc_GP:
-    SAVE_REGS
-    call isr_exc_GP
-    RESTORE_REGS
-    add esp,4
-    iret
+    FAULT_STUB isr_exc_GP
 
 _asm_exc_PF:
-    SAVE_REGS
-    call isr_exc_PF
-    RESTORE_REGS
-    add esp,4
-    iret
+    FAULT_STUB isr_exc_PF
 
 _asm_irq_0:
     SAVE_REGS

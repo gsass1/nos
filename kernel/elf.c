@@ -97,6 +97,12 @@ int elf_exec(const char *path)
         }
     }
 
+    // Map the process's ring-3 stack.
+    for (uint32_t a = USER_STACK_TOP - USER_STACK_SIZE; a < USER_STACK_TOP;
+         a += 0x1000) {
+        alloc_frame(get_page(a, 1, dir), 0 /* user */, 1 /* writable */);
+    }
+
     // Flush, then copy each segment's file image and zero the trailing .bss.
     asm volatile("mov %0, %%cr3" :: "r"(dir->phys_addr));
     for (uint32_t i = 0; i < eh->e_phnum; i++) {
@@ -112,6 +118,10 @@ int elf_exec(const char *path)
         }
     }
 
+    // Fresh frames hold whatever was in them last; hand the process a clean
+    // stack rather than another task's leftovers.
+    memset((void *)(USER_STACK_TOP - USER_STACK_SIZE), 0, USER_STACK_SIZE);
+
     asm volatile("mov %0, %%cr3" :: "r"(old_cr3));
     asm volatile("sti");
 
@@ -119,5 +129,5 @@ int elf_exec(const char *path)
     kfree(buf);
 
     mprintf(LOGLEVEL_DEFAULT, "elf_exec: '%s' loaded, entry 0x%08x\n", kpath, entry);
-    return spawn_task(kpath, (void *)entry, dir);
+    return spawn_task(kpath, (void *)entry, dir, USER_STACK_TOP);
 }
