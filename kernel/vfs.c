@@ -87,6 +87,9 @@ struct fs_node *vfs_resolve(const char *path)
         while (*path && *path != '/' && i < sizeof(comp) - 1) {
             comp[i++] = *path++;
         }
+        if (*path && *path != '/') {
+            return 0; // component exceeds the VFS name limit
+        }
         comp[i] = '\0';
         while (*path == '/') path++;
 

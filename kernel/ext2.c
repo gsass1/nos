@@ -23,6 +23,7 @@ MODULE("EXT2");
 #define EXT2_MAGIC      0xEF53
 #define EXT2_REV_OLD    0
 #define EXT2_ROOT_INO   2
+#define EXT2_FIRST_NORMAL_INO 11
 
 #define EXT2_S_IFREG    0x8000
 #define EXT2_S_IFDIR    0x4000
@@ -364,7 +365,7 @@ static uint32_t ext2_alloc_inode(struct ext2_mount *m)
     if (ext2_read_block(m, m->gd.bg_inode_bitmap, bm) < 0) { kfree(bm); return 0; }
 
     uint32_t total = m->sb.s_inodes_count;
-    for (uint32_t i = 0; i < total; i++) {
+    for (uint32_t i = EXT2_FIRST_NORMAL_INO - 1; i < total; i++) {
         if (!(bm[i / 8] & (1 << (i % 8)))) {
             bm[i / 8] |= (1 << (i % 8));
             int wr = ext2_write_block(m, m->gd.bg_inode_bitmap, bm);
@@ -628,6 +629,8 @@ static int ext2_dir_add(struct ext2_mount *m, uint32_t dir_ino,
             // Allocate a fresh block for the directory.
             uint32_t nblk = ext2_alloc_block(m);
             if (!nblk) { kfree(buf); return -1; }
+            uint32_t old_blocks = dir_in->i_blocks;
+            uint32_t old_size = dir_in->i_size;
             dir_in->i_block[b] = nblk;
             dir_in->i_blocks += bs / 512;
             dir_in->i_size = (b + 1) * bs;
@@ -638,8 +641,15 @@ static int ext2_dir_add(struct ext2_mount *m, uint32_t dir_ino,
             de->rec_len = bs; // spans the whole block
             de->name_len = namelen;
             memcpy(de + 1, name, namelen);
-            if (ext2_write_block(m, nblk, buf) < 0) { kfree(buf); return -1; }
-            if (ext2_write_inode(m, dir_ino, dir_in) < 0) { kfree(buf); return -1; }
+            if (ext2_write_block(m, nblk, buf) < 0 ||
+                ext2_write_inode(m, dir_ino, dir_in) < 0) {
+                dir_in->i_block[b] = 0;
+                dir_in->i_blocks = old_blocks;
+                dir_in->i_size = old_size;
+                ext2_free_block(m, nblk);
+                kfree(buf);
+                return -1;
+            }
             kfree(buf);
             return 0;
         }
@@ -1018,7 +1028,8 @@ struct fs_node *ext2_mount(struct block_device *dev)
     if (sb->s_feature_ro_compat != 0) return 0;
 
     // Geometry sanity.
-    if (sb->s_blocks_count == 0 || sb->s_inodes_count == 0) return 0;
+    if (sb->s_blocks_count == 0 ||
+        sb->s_inodes_count < EXT2_FIRST_NORMAL_INO) return 0;
     if (sb->s_blocks_per_group == 0 || sb->s_inodes_per_group == 0) return 0;
     if (sb->s_first_data_block != 1) return 0; // implied by 1 KiB blocks
 
