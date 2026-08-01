@@ -4,6 +4,7 @@
 #include <pipe.h>
 #include <string.h>
 #include <task.h>
+#include <tcp.h>
 #include <kernel.h>
 #include <debug.h>
 
@@ -33,6 +34,8 @@ void file_addref(struct file *f)
 {
     if (f->type == FD_PIPE_R || f->type == FD_PIPE_W) {
         pipe_addref(f->pipe, f->type == FD_PIPE_W);
+    } else if (f->type == FD_SOCKET) {
+        tcp_addref(f->sock);
     }
 }
 
@@ -40,10 +43,13 @@ void file_close(struct file *f)
 {
     if (f->type == FD_PIPE_R || f->type == FD_PIPE_W) {
         pipe_release(f->pipe, f->type == FD_PIPE_W);
+    } else if (f->type == FD_SOCKET) {
+        tcp_release(f->sock);
     }
     f->type = FD_NONE;
     f->node = 0;
     f->pipe = 0;
+    f->sock = 0;
 }
 
 // Drop every fd a dying task holds. This must happen when the task dies, not

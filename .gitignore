@@ -1,6 +1,7 @@
 *.iso
 *.elf
 *.o
+*.a
 *.swp
 iso/symtable
 
@@ -14,6 +15,7 @@ ex.txt
 LOG
 MON
 tests/serial.log
+tests/serial_net.log
 tests/screen.ppm
 tests/wm1.ppm
 tests/wm2.ppm
@@ -26,3 +28,4 @@ tests/wm8.ppm
 
 iso/initrd.tar
 initrd/
+build/

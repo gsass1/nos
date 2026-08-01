@@ -71,6 +71,9 @@ static inline int pollc(void)                 { return sys0(SYS_POLLC); }
 static inline int getfont(void *buf8192)      { return sys1(SYS_FONT, (int)buf8192); }
 static inline int uptime_ms(void)             { return sys0(SYS_UPTIME); }
 
+// Unix seconds (UTC) from the CMOS clock, or 0 if it was unreadable at boot.
+static inline unsigned time_unix(void)        { return (unsigned)sys0(SYS_TIME); }
+
 // Console channels: run a program in a captured terminal (see SYS_EXECC).
 static inline int execc(const char *path, char *const argv[])
 {
@@ -81,6 +84,19 @@ static inline int cwrite(int cid, const void *buf, int len) { return sys3(SYS_CW
 static inline int cstat(int cid)                      { return sys1(SYS_CSTAT, cid); }
 static inline int cclose(int cid)                     { return sys1(SYS_CCLOSE, cid); }
 static inline int kill(int pid)                       { return sys1(SYS_KILL, pid); }
+
+// DNS A lookup: writes the address (wire order, as SYS_CONNECT wants it)
+// to *ip. Returns 0, or -1 (no NIC, bad name, or resolver timeout).
+static inline int resolve(const char *name, unsigned *ip)
+{
+    return sys3(SYS_RESOLVE, (int)name, (int)ip, 0);
+}
+
+// Open a TCP connection; returns a socket fd to read/write/close, or -1.
+static inline int connect(unsigned ip, int port)
+{
+    return sys3(SYS_CONNECT, (int)ip, port, 0);
+}
 
 // Enters graphics mode; returns the mapped 32bpp framebuffer, or (void *)-1.
 static inline void *fbmap(void)

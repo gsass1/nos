@@ -20,12 +20,14 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr initrd/wget
 OBJ=boot/boot.o \
 	drivers/keyboard.o \
 	drivers/mouse.o \
 	drivers/serial.o \
 	drivers/ata.o \
+	drivers/rtc.o \
+	drivers/rtl8139.o \
 	kernel/block.o \
 	kernel/console.o \
 kernel/copy_page_physical.o \
@@ -40,6 +42,7 @@ kernel/kernel.o \
 kernel/kmalloc.o \
 kernel/main.o \
 kernel/mutex.o \
+kernel/net.o \
 kernel/paging.o \
 kernel/pci.o \
 kernel/pic.o \
@@ -48,11 +51,49 @@ kernel/pit.o \
 kernel/string.o \
 kernel/syscall.o \
 kernel/task.o \
+kernel/tcp.o \
 kernel/vfs.o \
 kernel/vga.o \
 kernel/vsprintf.o
 
+# BearSSL (third_party/bearssl, git submodule), built for userland against the
+# freestanding shim libc in user/libc. The x86 SIMD implementations are
+# excluded -- their intrinsics headers require a hosted libc -- and disabled
+# through the BR_* macros so BearSSL's portable constant-time code is used.
+# -O2 matters: TLS handshakes do real bignum math on an emulated i386.
+# Objects go to build/bearssl so the submodule checkout stays clean.
+BEARSSL_DIR=third_party/bearssl
+ifeq ($(wildcard $(BEARSSL_DIR)/src),)
+$(error $(BEARSSL_DIR) is empty; run: git submodule update --init)
+endif
+BEARSSL_BUILD=build/bearssl
+BEARSSL_SRC=$(filter-out %/ghash_pclmul.c %/chacha20_sse2.c %/sysrng.c \
+    $(wildcard $(BEARSSL_DIR)/src/symcipher/aes_x86ni*.c), \
+    $(wildcard $(BEARSSL_DIR)/src/*.c $(BEARSSL_DIR)/src/*/*.c))
+BEARSSL_OBJ=$(patsubst $(BEARSSL_DIR)/src/%.c,$(BEARSSL_BUILD)/%.o,$(BEARSSL_SRC))
+# The BR_USE_* pins disable BearSSL's host-OS auto-detection: a Linux-target
+# cross compiler (CI's i686-linux-gnu-gcc) defines __unix__/__linux__, which
+# would pull in <time.h>/urandom paths that don't exist on NOS. wget provides
+# the validation time (SYS_TIME) and entropy explicitly.
+BEARSSL_CFLAGS=-I$(BEARSSL_DIR)/inc -I$(BEARSSL_DIR)/src -Iuser/libc \
+    -std=gnu99 -ffreestanding -O2 -g \
+    -DBR_AES_X86NI=0 -DBR_SSE2=0 -DBR_RDRAND=0 \
+    -DBR_USE_UNIX_TIME=0 -DBR_USE_WIN32_TIME=0 \
+    -DBR_USE_URANDOM=0 -DBR_USE_GETENTROPY=0 -DBR_USE_WIN32_RAND=0
+BEARSSL_LIB=$(BEARSSL_BUILD)/libbearssl.a
+AR=$(TOOLPREFIX)ar
+
 all: $(BIN)
+
+$(BEARSSL_BUILD)/%.o: $(BEARSSL_DIR)/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $< -o $@ $(BEARSSL_CFLAGS)
+
+$(BEARSSL_LIB): $(BEARSSL_OBJ)
+	$(AR) rcs $@ $(BEARSSL_OBJ)
+
+user/libc/libc.o: user/libc/libc.c user/libc/string.h
+	$(CC) -c user/libc/libc.c -o user/libc/libc.o $(CFLAGS)
 
 boot/boot.o: boot/boot.S
 	$(AS) boot/boot.S -o boot/boot.o $(AFLAGS)
@@ -68,6 +109,12 @@ drivers/serial.o: drivers/serial.c
 
 drivers/ata.o: drivers/ata.c
 	$(CC) -c drivers/ata.c -o drivers/ata.o $(CFLAGS)
+
+drivers/rtc.o: drivers/rtc.c
+	$(CC) -c drivers/rtc.c -o drivers/rtc.o $(CFLAGS)
+
+drivers/rtl8139.o: drivers/rtl8139.c
+	$(CC) -c drivers/rtl8139.c -o drivers/rtl8139.o $(CFLAGS)
 
 kernel/block.o: kernel/block.c
 	$(CC) -c kernel/block.c -o kernel/block.o $(CFLAGS)
@@ -111,6 +158,9 @@ kernel/main.o: kernel/main.c
 kernel/mutex.o: kernel/mutex.c
 	$(CC) -c kernel/mutex.c -o kernel/mutex.o $(CFLAGS)
 
+kernel/net.o: kernel/net.c
+	$(CC) -c kernel/net.c -o kernel/net.o $(CFLAGS)
+
 kernel/paging.o: kernel/paging.c
 	$(CC) -c kernel/paging.c -o kernel/paging.o $(CFLAGS)
 
@@ -134,6 +184,9 @@ kernel/syscall.o: kernel/syscall.c
 
 kernel/task.o: kernel/task.c
 	$(CC) -c kernel/task.c -o kernel/task.o $(CFLAGS)
+
+kernel/tcp.o: kernel/tcp.c
+	$(CC) -c kernel/tcp.c -o kernel/tcp.o $(CFLAGS)
 
 kernel/vfs.o: kernel/vfs.c
 	$(CC) -c kernel/vfs.c -o kernel/vfs.o $(CFLAGS)
@@ -212,11 +265,17 @@ initrd/badptr: user/badptr.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/badptr.c -o user/badptr.o $(CFLAGS)
 	$(LD) -T user/user.ld user/badptr.o -o initrd/badptr
 
+# wget links BearSSL for https; the shim libc satisfies BearSSL's five libc
+# imports (and gcc's own memcpy/memset emissions).
+initrd/wget: user/wget.c user/trust_anchors.h user/ulib.h user/user.ld include/syscall.h user/libc/libc.o $(BEARSSL_LIB)
+	$(CC) -c user/wget.c -o user/wget.o $(CFLAGS) -I$(BEARSSL_DIR)/inc
+	$(LD) -T user/user.ld user/wget.o user/libc/libc.o -o initrd/wget $(BEARSSL_LIB)
+
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr wget
 
 initrd: $(INITRD)
 
@@ -225,18 +284,29 @@ initrd: $(INITRD)
 run: $(BIN) $(INITRD)
 	qemu-system-i386 -kernel $(BIN) -initrd $(INITRD) -serial stdio
 
+# Same, plus an RTL8139 on user-mode networking: `wget google.com` works from
+# the shell (DNS via slirp at 10.0.2.3, outbound TCP proxied by the host).
+run-net: $(BIN) $(INITRD)
+	qemu-system-i386 -kernel $(BIN) -initrd $(INITRD) -serial stdio \
+		-netdev user,id=n0 -device rtl8139,netdev=n0
+
 # Boot/integration tests: drives the shell in headless QEMU and asserts on
 # serial output and the VGA screen. See tests/run_tests.py.
 test: $(BIN) $(INITRD)
 	python3 tests/run_tests.py
 	python3 tests/run_ata_tests.py
+	python3 tests/run_net_tests.py
 
 test-ata: $(BIN) $(INITRD)
 	python3 tests/run_ata_tests.py
+
+test-net: $(BIN) $(INITRD)
+	python3 tests/run_net_tests.py
 
 clean:
 	rm -f $(OBJ)
 	rm -f $(BIN)
 	rm -f $(ISO)
-	rm -f user/*.o
+	rm -f user/*.o user/libc/libc.o
+	rm -rf $(BEARSSL_BUILD)
 	rm -rf initrd
