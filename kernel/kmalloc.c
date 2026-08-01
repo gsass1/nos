@@ -38,6 +38,12 @@ void heap_init(void)
 
 void *kmalloc(uint32_t size)
 {
+    // Round up so every block boundary stays on the sizeof(struct alloc) grid.
+    // Otherwise an odd-sized allocation (e.g. an 8196-byte page_directory or an
+    // odd ELF file) shifts all following headers off-grid and the "size 0 means
+    // last block" walk drifts past heap_end, corrupting the free list.
+    size = (size + sizeof(struct alloc) - 1) & ~(sizeof(struct alloc) - 1);
+
     uint32_t mem = heap;
     struct alloc *alloc;
     while(mem < heap_end) {
@@ -84,6 +90,9 @@ void kfree(void *ptr)
 
 void *kmalloc_a(uint32_t size)
 {
+    // Keep block boundaries on the header-size grid (see kmalloc).
+    size = (size + sizeof(struct alloc) - 1) & ~(sizeof(struct alloc) - 1);
+
     uint32_t mem = heap;
     struct alloc *alloc;
     while(mem < heap_end) {
@@ -133,8 +142,11 @@ void *kmalloc_a(uint32_t size)
                         return HEAD_TO_POINTER(alloc);
                     } else {
                         // Dang it, now we need to skip 4096 bytes + offset to get the next page aligned address
-                        // First we have to allocate a empty block
-                        alloc->size = offset + 0x1000;
+                        // First we have to allocate a empty block. Its payload must
+                        // end exactly where the aligned block's header begins, i.e.
+                        // at (addr + 0x1000) - sizeof(struct alloc); subtracting the
+                        // header size here is what keeps the block chain aligned.
+                        alloc->size = offset + 0x1000 - sizeof(struct alloc);
 
                         // Now get to the next one
                         alloc = (struct alloc *)((addr + 0x1000) - sizeof(struct alloc));

@@ -1,4 +1,5 @@
 #include <syscall.h>
+#include <elf.h>
 #include <idt.h>
 #include <kernel.h>
 #include <keyboard.h>
@@ -64,6 +65,16 @@ static int sys_readdir(uint32_t index, char *name_out)
     return 0;
 }
 
+// Block (yielding to other tasks) until the given task has exited, i.e. is no
+// longer in the ready queue.
+static int sys_wait(int pid)
+{
+    while (task_alive(pid)) {
+        task_switch();
+    }
+    return 0;
+}
+
 void syscall_dispatch(struct regs *r)
 {
     switch (r->eax) {
@@ -82,6 +93,12 @@ void syscall_dispatch(struct regs *r)
     case SYS_CLEAR:
         vga_clear();
         r->eax = 0;
+        break;
+    case SYS_EXEC:
+        r->eax = (uint32_t)elf_exec((const char *)r->ebx);
+        break;
+    case SYS_WAIT:
+        r->eax = (uint32_t)sys_wait((int)r->ebx);
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

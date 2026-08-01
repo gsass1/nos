@@ -63,7 +63,7 @@ void tasking_init(void)
     asm volatile("sti");
 }
 
-int spawn_task(const char *name, void *entry)
+int spawn_task(const char *name, void *entry, struct page_directory *dir)
 {
     mprintf(LOGLEVEL_DEBUG, "Spawning task %s with entry: 0x%08x\n", name, entry);
 
@@ -71,14 +71,14 @@ int spawn_task(const char *name, void *entry)
 
     struct task *task = kmalloc(sizeof(struct task));
     task->id = next_pid++;
-    task->page_directory = (struct page_directory *)current_directory;
+    task->page_directory = dir ? dir : current_directory;
     task->next = 0;
     strcpy(task->name, name);
 
     // Allocate a kernel stack and prime it with a trap frame identical to the
     // one _asm_irq_0 leaves behind, so the scheduler can iret straight into
     // `entry` as if this task had just been preempted there.
-    const uint32_t stack_size = 0x1000;
+    const uint32_t stack_size = 0x4000; // 16KB kernel stack (headroom for nested IRQs/syscalls)
     uint8_t *stack_mem = kmalloc(stack_size);
     task->stack_mem = stack_mem;
 
@@ -148,6 +148,18 @@ void exit(void)
     task_switch();
 
     panic("exit(): returned from final task_switch!\n");
+}
+
+int task_alive(int pid)
+{
+    struct task *t = (struct task *)ready_queue;
+    while (t) {
+        if (t->id == pid) {
+            return 1;
+        }
+        t = t->next;
+    }
+    return 0;
 }
 
 int getpid(void)

@@ -10,6 +10,8 @@
 #define SYS_GETC    2   // getc(void)                 -> next key (blocking)
 #define SYS_READDIR 3   // readdir(uint idx, char *name) -> 0, or -1 at end
 #define SYS_CLEAR   4   // clear(void)                 -> clears the screen
+#define SYS_EXEC    5   // exec(const char *path)      -> child pid, or -1
+#define SYS_WAIT    6   // wait(int pid)               -> 0 once that task exits
 
 // Saved register frame as laid out by SAVE_REGS in interrupt.S, from the
 // lowest saved address upward. The dispatcher reads args from here and writes

@@ -78,8 +78,14 @@ enum keycode {
     ENTER_RELEASED = 0x9C,
 };
 
-static uint8_t *keycache = 0;
-static uint32_t keyloc = 0;
+// Circular scancode->ascii buffer. Producer is kbd_irq, consumer is kbd_getc.
+// Bounded so a burst of key events can never write past it (the old code grew
+// keyloc without limit and scribbled past a 256-byte heap buffer, corrupting
+// the next allocation).
+#define KBD_BUF_SIZE 256
+static uint8_t keybuf[KBD_BUF_SIZE];
+static uint32_t kbd_head = 0; // next write slot
+static uint32_t kbd_tail = 0; // next read slot
 
 static char* _qwertzuiop = "qwertzuiop"; // 0x10-0x1c
 static char* _asdfghjkl = "asdfghjkl";
@@ -114,35 +120,33 @@ static uint8_t to_ascii(uint8_t key)
 void kbd_irq(void)
 {
     uint8_t code = inb(0x60);
-    keycache[keyloc++] = to_ascii(code);
+    uint8_t c = to_ascii(code);
+    if(c == 0) {
+        return; // key release or unmapped key
+    }
+
+    uint32_t next = (kbd_head + 1) % KBD_BUF_SIZE;
+    if(next != kbd_tail) { // drop the key if the buffer is full
+        keybuf[kbd_head] = c;
+        kbd_head = next;
+    }
 }
 
 void kbd_init(void)
 {
     mprintf(LOGLEVEL_DEFAULT, "Initializing PS/2 Keyboard\n");
 
-    keycache = kmalloc(256);
-    memset(keycache, 0, 256);
+    kbd_head = kbd_tail = 0;
 
     outb(0x60, 0xF4);  // Enable scanning (keyboard command via data port 0x60)
 }
 
 char kbd_getc(void)
 {
-    uint8_t key = 0;
-    int i = 0;
-
-    if(keyloc == 0) {
-        goto out;
+    if(kbd_tail == kbd_head) {
+        return 0; // buffer empty
     }
-
-    key = *keycache;
-    keyloc--;
-
-    for(; i < 256; i++) {
-        keycache[i] = keycache[i + 1];
-    }
-
-out:
+    uint8_t key = keybuf[kbd_tail];
+    kbd_tail = (kbd_tail + 1) % KBD_BUF_SIZE;
     return key;
 }

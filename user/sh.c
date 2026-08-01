@@ -68,9 +68,16 @@ static void run(const char *cmd)
         put("bye!\n");
         sys3(SYS_EXIT, 0, 0, 0);
     } else {
-        put("unknown command: ");
-        put(cmd);
-        put("\n");
+        // Not a builtin: try to run it as a program from the initrd, then wait
+        // for it to finish before showing the prompt again.
+        int pid = sys3(SYS_EXEC, (int)cmd, 0, 0);
+        if (pid < 0) {
+            put("unknown command: ");
+            put(cmd);
+            put("\n");
+        } else {
+            sys3(SYS_WAIT, pid, 0, 0);
+        }
     }
 }
 

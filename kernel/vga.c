@@ -107,10 +107,17 @@ void vga_set_cursor(uint16_t x, uint16_t y)
 
 void vga_scroll(void)
 {
-	uint16_t temp_buf[VGA_BUF_SIZE];
-    memcpy(temp_buf, vga_mem, VGA_BUF_SIZE*2);
-    memset(vga_mem, 0, VGA_BUF_SIZE*2);
-    memcpy(vga_mem, (void *)((uint32_t)temp_buf + VGA_WIDTH*2), VGA_WIDTH * (VGA_HEIGHT - 1) * 2);
-    vga_col = 0;
-    vga_row = VGA_HEIGHT - 1;
+	// Move rows 1..HEIGHT-1 up by one row, in place. This used to stage the
+	// whole screen in a VGA_BUF_SIZE (4000-byte) stack buffer, which overflowed
+	// the small per-task kernel stacks and corrupted the heap below them.
+	// memcpy copies forward and dest < src, so the overlap is safe.
+	memcpy(vga_mem, vga_mem + VGA_WIDTH, VGA_WIDTH * (VGA_HEIGHT - 1) * 2);
+
+	// Blank the last row.
+	for(int j = 0; j < VGA_WIDTH; j++) {
+		vga_mem[(VGA_HEIGHT - 1) * VGA_WIDTH + j] = make_vga_entry(' ', vga_current_color);
+	}
+
+	vga_col = 0;
+	vga_row = VGA_HEIGHT - 1;
 }

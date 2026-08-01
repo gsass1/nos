@@ -21,8 +21,12 @@ struct task
 
 void tasking_init(void);
 
-// Create a runnable kernel thread that begins executing at `entry`.
-int spawn_task(const char *name, void *entry);
+// Create a runnable task that begins executing at `entry` in address space
+// `dir` (pass 0 to share the current directory).
+int spawn_task(const char *name, void *entry, struct page_directory *dir);
+
+// Returns non-zero while a task with the given pid is still in the ready queue.
+int task_alive(int pid);
 
 // Cooperative yield. Picks the next task and switches to it, returning to the
 // caller when this task is next scheduled. Also used as the timer-preemption
