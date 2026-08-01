@@ -10,6 +10,9 @@ static struct fs_node *root_nodes;
 static struct fs_node *initrd_dev = 0;
 static struct dirent dirent;
 static uint32_t nroot_nodes;
+// The ext2 mountpoint node, or 0 if no disk is mounted. Set by main.c after
+// ext2_mount; appears as "disk" in the initrd root listing.
+static struct fs_node *ext2_mount_node = 0;
 
 struct tar_header_chain
 {
@@ -97,12 +100,28 @@ static struct dirent *initrd_readdir(struct fs_node *node, uint32_t index)
         return &dirent;
     }
 
-    if(index - 1 >= nroot_nodes) {
+    if(node == initrd_root && ext2_mount_node && index == 1) {
+        strcpy(dirent.name, "disk");
+        dirent.name[4] = 0;
+        dirent.inode = 0;
+        return &dirent;
+    }
+
+    // For the root, file entries start after "dev" (and "disk" if mounted).
+    // For non-root nodes (initrd_dev), preserve the original base-1 behavior.
+    uint32_t base;
+    if (node == initrd_root) {
+        base = ext2_mount_node ? 2 : 1;
+    } else {
+        base = 1;
+    }
+
+    if(index < base || index - base >= nroot_nodes) {
         return 0;
     }
-    strcpy(dirent.name, root_nodes[index - 1].name);
-    dirent.name[strlen(root_nodes[index - 1].name)] = 0;
-    dirent.inode = root_nodes[index - 1].inode;
+    strcpy(dirent.name, root_nodes[index - base].name);
+    dirent.name[strlen(root_nodes[index - base].name)] = 0;
+    dirent.inode = root_nodes[index - base].inode;
     return &dirent;
 }
 
@@ -110,6 +129,10 @@ static struct fs_node *initrd_finddir(struct fs_node *node, char *name)
 {
     if(node == initrd_root && !strcmp(name, "dev")) {
         return initrd_dev;
+    }
+
+    if(node == initrd_root && ext2_mount_node && !strcmp(name, "disk")) {
+        return ext2_mount_node;
     }
 
     uint32_t i;
@@ -139,6 +162,11 @@ static uint32_t initrd_read(struct fs_node *node, uint32_t offset, uint32_t size
     return size;
 }
 
+void initrd_set_disk_mount(struct fs_node *node)
+{
+    ext2_mount_node = node;
+}
+
 struct fs_node *initrd_init(void *ptr)
 {
     mprintf(LOGLEVEL_DEFAULT, "Initializing initrd\n");
@@ -151,6 +179,7 @@ struct fs_node *initrd_init(void *ptr)
     num_files = parse(ptr);
 
     initrd_root = kmalloc(sizeof(struct fs_node));
+    memset(initrd_root, 0, sizeof(*initrd_root));
     strcpy(initrd_root->name, "initrd");
     initrd_root->mask = 0;
     initrd_root->uid = 0;
@@ -170,6 +199,7 @@ struct fs_node *initrd_init(void *ptr)
     mprintf(LOGLEVEL_DEBUG, "initrd_root: 0x%08x\n", initrd_root);
 
     initrd_dev = kmalloc(sizeof(struct fs_node));
+    memset(initrd_dev, 0, sizeof(*initrd_dev));
     strcpy(initrd_dev->name, "dev");
     initrd_dev->mask = initrd_dev->uid = initrd_dev->gid = initrd_dev->inode = initrd_dev->length = 0;
     initrd_dev->flags = FS_DIRECTORY;
@@ -189,6 +219,7 @@ struct fs_node *initrd_init(void *ptr)
     struct tar_header_chain *header = headers;
     for(i = 0; i < nroot_nodes; i++) {
 		mprintf(LOGLEVEL_DEBUG, "Added file: %s, inode: %d\n", header->tar_header->filename, i);
+        memset(&root_nodes[i], 0, sizeof(root_nodes[i]));
         strcpy(root_nodes[i].name, header->tar_header->filename);
         root_nodes[i].length = header->size;
         root_nodes[i].inode = i;

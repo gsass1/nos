@@ -101,8 +101,10 @@ flowchart TD
     F --> G["heap_init<br/>mm_paging_init(mem_size)"]
     G --> H["ata_init<br/>IDENTIFY disks"]
     H --> H2["kbd_init"]
-    H2 --> I["initrd_init -> fs_root<br/>sym_init"]
-    I --> J["syscall_init<br/>(int 0x80 gate)"]
+    H2 --> I["initrd_init -> fs_root"]
+    I --> I2["ext2_mount(block_get(0))<br/>-> /disk mountpoint (if disk present)"]
+    I2 --> I3["sym_init"]
+    I3 --> J["syscall_init<br/>(int 0x80 gate)"]
     J --> K["tasking_init<br/>(kernel_task adopts boot stack)"]
     K --> L["elf_exec('sh')<br/>load + run the shell"]
     L --> M["idle loop:<br/>reap_tasks(); hlt"]
@@ -417,15 +419,53 @@ coexist because they're in separate page directories.
 
 ---
 
-## 12. VFS and initrd
+## 12. VFS, initrd, and ext2
 
 `include/vfs.h` defines a minimal VFS node with function pointers
-(`read`/`readdir`/`finddir`). `fs_root` is the root node.
+(`read`/`write`/`readdir`/`finddir`). `fs_root` is the root node — the initrd.
+
+### Hierarchical path resolution
+
+`vfs_resolve(path)` walks `/`-separated path components from `fs_root`, calling
+`finddir` at each level. This lets the initrd root delegate `disk/...` paths to
+the ext2 mountpoint, while flat names like `sh` still resolve to initrd files
+exactly as before. `sys_open`, `sys_openmode`, `sys_listdir`, and `elf_exec`
+all use `vfs_resolve` instead of the old single-level `vfs_finddir`.
+
+### Initrd
 
 The initrd (`kernel/initrd.c`) is a **ustar tar** passed as a Multiboot module.
 `initrd_init` parses the tar into a flat list of file nodes (plus a synthetic
 `dev` directory). Each file's `read` returns bytes straight out of the tar image
-in memory. The initrd currently holds `symtable`, `hello`, and `sh`.
+in memory. The initrd holds the symbol table and all user programs.
+
+### ext2 mount
+
+If the first ATA block device contains a valid ext2 filesystem, `ext2_mount`
+(`kernel/ext2.c`) reads and validates the superblock, group descriptor, and
+root inode, then installs the ext2 root as a `"disk"` entry in the initrd root's
+`readdir`/`finddir`. The initrd remains the root filesystem; ext2 is accessible
+only as `/disk/...`.
+
+The ext2 driver supports:
+- **Reads**: directory listing and lookup, regular-file reads through direct
+  (blocks 0–11) and singly-indirect (block 12) block pointers.
+- **Writes**: create/truncate/write of regular files in existing directories.
+  `SYS_OPENMODE` with `O_CREATE`/`O_TRUNC`/`O_WRONLY` opens or creates a
+  writable fd; `sys_write` routes `FD_FILE` writes through VFS with access-mode
+  enforcement (the `FD_WRITABLE` flag).
+- **Metadata**: inode/block bitmaps, free counts in the superblock and group
+  descriptor, inode size/block counts/link count, and directory entries are
+  maintained on every mutation. Newly allocated blocks are zeroed. A per-mount
+  mutex serializes reads as well as metadata/data writes.
+
+Validation on mount: magic (0xEF53), revision 0, all three feature masks
+(compat, incompat, ro-compat) zero, 1 KiB block size, one block group, 128-byte inodes,
+non-zero geometry, in-range block/inode pointers, and valid directory record
+lengths. Mounting never formats — an invalid filesystem is silently skipped.
+
+Intentional limitations: no unlink, mkdir, symlinks, multi-block-group writes,
+or journaling. The `disktest` user utility exercises listing, reads, and writes.
 
 ---
 
@@ -438,6 +478,7 @@ in memory. The initrd currently holds `symtable`, `hello`, and `sh`.
 | Serial  | `drivers/serial.c`  | COM1; mirrors console output (used for logging/tests) |
 | PIT     | `kernel/pit.c`      | 200 Hz timer; IRQ0 drives the scheduler |
 | ATA     | `drivers/ata.c`     | Legacy primary/secondary PIO; IDENTIFY plus bounded polling LBA28 reads, writes, and cache flush |
+| ext2    | `kernel/ext2.c`     | Revision-0 ext2 read/write: mount validation, directory listing/lookup, file read (direct + singly-indirect), create/truncate/write with bitmap/free-count maintenance; serialized by per-mount mutex |
 
 `kprintf` writes to both VGA and serial (guarded by a mutex); `mprintf` prefixes
 a module tag; `panic` prints a message and a symbolic stack trace, then halts.
@@ -446,7 +487,8 @@ a module tag; `panic` prints a message and a symbolic stack trace, then halts.
 and validates every request against the device capacity before dispatching it.
 ATA channels are mutex-serialized, and device interrupts stay disabled because
 this first storage path uses bounded polling. The initrd remains the root
-filesystem; no raw disk interface is exposed to ring 3.
+filesystem; ext2 is mounted as `/disk` when a valid filesystem is present on the
+first ATA device. No raw disk interface is exposed to ring 3.
 
 ---
 
@@ -458,6 +500,10 @@ filesystem; no raw disk interface is exposed to ring 3.
   stack pointer `esp0` for the ring3→ring0 transition), and entering programs
   with an `iret` to the user segments instead of `0x08`. The `sh`/`hello`
   binaries won't need to change.
+- **ext2** is limited to revision 0, 1 KiB blocks, one block group, no
+  features. Supports read (direct + singly-indirect), create, truncate, and
+  write of regular files in existing directories. No unlink, mkdir, symlinks,
+  multi-group writes, or journaling.
 - **Heap** doesn't split or coalesce; fixed 2.4 MiB.
 - **Scheduler** is plain round-robin, no priorities or sleeping (blocking calls
   busy-yield).
@@ -476,6 +522,7 @@ filesystem; no raw disk interface is exposed to ring 3.
 | `kernel/pic.c` | 8259 PIC remap |
 | `kernel/pit.c` | Timer (200 Hz) |
 | `kernel/block.c`, `drivers/ata.c` | Block-device registry and polling ATA PIO |
+| `kernel/ext2.c`, `include/ext2.h` | ext2 rev-0 read/write filesystem |
 | `kernel/interrupt.S` | ISR stubs, `SAVE/RESTORE_REGS`, `task_switch`, `_asm_syscall` |
 | `kernel/isr.c` | C exception/IRQ handlers |
 | `kernel/paging.c` | Frame allocator, page tables, `clone/free_directory` |
@@ -483,10 +530,10 @@ filesystem; no raw disk interface is exposed to ring 3.
 | `kernel/task.c` | Tasks, `schedule`, `spawn_task`, `exit`, reaper |
 | `kernel/syscall.c` | `int 0x80` dispatch and syscalls |
 | `kernel/elf.c` | ELF loader |
-| `kernel/vfs.c`, `kernel/initrd.c` | VFS + initrd (tar) |
+| `kernel/vfs.c`, `kernel/initrd.c` | VFS (hierarchical path resolution) + initrd (tar) |
 | `kernel/vga.c`, `drivers/keyboard.c`, `drivers/serial.c` | Drivers |
 | `kernel/kernel.c` | `kprintf`/`mprintf`/`panic`, symbol table, stack traces |
-| `user/sh.c`, `user/hello.c`, `user/user.ld` | Userspace programs |
+| `user/sh.c`, `user/hello.c`, `user/disktest.c`, `user/user.ld` | Userspace programs |
 | `include/*.h` | Public headers for each subsystem |
 
 ---

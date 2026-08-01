@@ -59,7 +59,7 @@ static int sys_write(int fd, const char *buf, uint32_t len)
     if (!f || !user_ok(buf, len, 0)) {
         return -1;
     }
-    switch (f->type) {
+    switch (FD_TYPE(f->type)) {
     case FD_CONSOLE:
         console_write(buf, len);
         return (int)len;
@@ -75,8 +75,18 @@ static int sys_write(int fd, const char *buf, uint32_t len)
             serial_write_c(buf[i]);
         }
         return (int)len;
+    case FD_FILE:
+        // Writes go through VFS with access-mode enforcement: only fds
+        // opened for writing (via SYS_OPENMODE) may write. Initrd files
+        // are read-only because SYS_OPEN never sets the writable flag.
+        if (!(f->type & FD_WRITABLE) || !f->node || !f->node->write) {
+            return -1;
+        }
+        uint32_t wrote = vfs_write(f->node, f->offset, len, (uint8_t *)buf);
+        f->offset += wrote;
+        return (int)wrote;
     default:
-        return -1; // initrd files are read-only; FD_NONE is nothing at all
+        return -1; // FD_NONE is nothing at all
     }
 }
 
@@ -140,7 +150,7 @@ static int sys_open(const char *path)
     if (!user_path_ok(path)) {
         return -1;
     }
-    struct fs_node *node = vfs_finddir(fs_root, (char *)path);
+    struct fs_node *node = vfs_resolve(path);
     if (!node) {
         return -1;
     }
@@ -150,10 +160,140 @@ static int sys_open(const char *path)
             t->files[i].type = FD_FILE;
             t->files[i].node = node;
             t->files[i].offset = 0;
-            return i;
+            return i; // SYS_OPEN is read-only (no FD_WRITABLE)
         }
     }
     return -1; // no free slot
+}
+
+// Open or create a file with explicit access flags. O_CREATE creates a new
+// regular file in the parent directory if the path does not exist; O_TRUNC
+// frees all data blocks (requires writable access). O_WRONLY/O_RDWR mark the
+// fd as writable so sys_write accepts it. Returns an fd (>= 3), or -1 on
+// failure. A free fd is reserved before any create/truncate side effect so
+// a full fd table does not leave a created/truncated file behind.
+//
+// The resolved node must be a regular file (FS_FILE); directories are never
+// opened writable and O_TRUNC is rejected for anything but a regular file.
+static int sys_openmode(const char *path, int flags)
+{
+    if (!user_path_ok(path)) {
+        return -1;
+    }
+
+    // Validate flag combinations: only known bits, and O_TRUNC requires
+    // writable access (O_WRONLY or O_RDWR).
+    int acc = flags & (O_RDONLY | O_WRONLY | O_RDWR);
+    if (flags & ~(O_RDONLY | O_WRONLY | O_RDWR | O_CREATE | O_TRUNC)) {
+        return -1;
+    }
+    if ((flags & O_TRUNC) && !(acc & (O_WRONLY | O_RDWR))) {
+        return -1;
+    }
+    // O_RDONLY=0, O_WRONLY=1, O_RDWR=2 — any other combo is invalid.
+    if (acc != O_RDONLY && acc != O_WRONLY && acc != O_RDWR) {
+        return -1;
+    }
+
+    char kpath[128];
+    strncpy(kpath, path, sizeof(kpath) - 1);
+    kpath[sizeof(kpath) - 1] = '\0';
+
+    // Reject empty path input (nothing to open).
+    if (kpath[0] == '\0') {
+        return -1;
+    }
+
+    // Reserve a free fd up front so create/truncate side effects are skipped
+    // when the fd table is already full.
+    struct task *t = task_current();
+    int fd = -1;
+    for (int i = 3; i < TASK_MAX_FILES; i++) {
+        if (t->files[i].type == FD_NONE) {
+            fd = i;
+            break;
+        }
+    }
+    if (fd < 0) {
+        return -1; // no free slot — fail before any side effect
+    }
+
+    struct fs_node *node = vfs_resolve(kpath);
+    if (!node) {
+        if (!(flags & O_CREATE)) {
+            return -1;
+        }
+        // Split into parent path and leaf name, then create in the parent.
+        int last = -1;
+        for (int i = 0; kpath[i]; i++) {
+            if (kpath[i] == '/') last = i;
+        }
+        struct fs_node *parent;
+        const char *leaf;
+        if (last < 0) {
+            parent = fs_root;
+            leaf = kpath;
+        } else {
+            kpath[last] = '\0';
+            leaf = kpath + last + 1;
+            // Reject empty leaf names and trailing slashes.
+            if (*leaf == '\0' || *leaf == '/') {
+                return -1;
+            }
+            // If the parent path is empty (path was "/leaf"), resolve to root.
+            if (kpath[0] == '\0') {
+                parent = fs_root;
+            } else {
+                parent = vfs_resolve(kpath);
+            }
+        }
+        if (!parent || (parent->flags & 0x7) != FS_DIRECTORY) {
+            return -1;
+        }
+        node = vfs_create(parent, leaf);
+        if (!node) {
+            return -1;
+        }
+    }
+
+    // The resolved node must be a regular file — never open a directory
+    // writable, and O_TRUNC only applies to regular files.
+    if ((node->flags & 0x7) != FS_FILE) {
+        return -1;
+    }
+    if (flags & O_TRUNC) {
+        if (vfs_truncate(node) < 0) {
+            return -1; // truncate failed — do not open
+        }
+    }
+
+    t->files[fd].type = FD_FILE |
+        ((flags & (O_WRONLY | O_RDWR)) ? FD_WRITABLE : 0) |
+        ((flags & O_WRONLY) ? FD_WRITEONLY : 0);
+    t->files[fd].node = node;
+    t->files[fd].offset = 0;
+    return fd;
+}
+
+// List the Nth entry of the directory at `path`. Writes the entry name (up
+// to 127 bytes + NUL) into the 128-byte `name` buffer. Returns 0 on success,
+// -1 at end or on error.
+static int sys_listdir(const char *path, uint32_t index, char *name)
+{
+    if (!user_path_ok(path) || !user_ok(name, 128, 1)) {
+        return -1;
+    }
+    struct fs_node *node = vfs_resolve(path);
+    if (!node) {
+        return -1;
+    }
+    struct dirent *de = vfs_readdir(node, index);
+    if (!de) {
+        return -1;
+    }
+    strncpy(name, de->name, 127);
+    name[127] = '\0';
+    return 0;
 }
 
 static int sys_read(int fd, char *buf, uint32_t len)
@@ -162,7 +302,7 @@ static int sys_read(int fd, char *buf, uint32_t len)
     if (!f || !user_ok(buf, len, 1)) {
         return -1;
     }
-    switch (f->type) {
+    switch (FD_TYPE(f->type)) {
     case FD_CONSOLE:
     case FD_CHANNEL: {
         // Interactive: block for one byte at a time.
@@ -177,6 +317,10 @@ static int sys_read(int fd, char *buf, uint32_t len)
         return 1;
     }
     case FD_FILE: {
+        // A write-only fd (O_WRONLY) must not be readable.
+        if (f->type & FD_WRITEONLY) {
+            return -1;
+        }
         uint32_t got = vfs_read(f->node, f->offset, len, (uint8_t *)buf);
         f->offset += got;
         return (int)got;
@@ -506,6 +650,13 @@ void syscall_dispatch(struct regs *r)
         r->eax = (uint32_t)sys_exec2((const char *)r->ebx,
                                      (const char *const *)r->ecx,
                                      (const int *)r->edx);
+        break;
+    case SYS_OPENMODE:
+        r->eax = (uint32_t)sys_openmode((const char *)r->ebx, (int)r->ecx);
+        break;
+    case SYS_LISTDIR:
+        r->eax = (uint32_t)sys_listdir((const char *)r->ebx, r->ecx,
+                                       (char *)r->edx);
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

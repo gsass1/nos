@@ -37,6 +37,8 @@ static inline void exit(int code)
 static inline int write(int fd, const void *buf, int len) { return sys3(SYS_WRITE, fd, (int)buf, len); }
 static inline int read(int fd, void *buf, int len)        { return sys3(SYS_READ, fd, (int)buf, len); }
 static inline int open(const char *path)                  { return sys1(SYS_OPEN, (int)path); }
+static inline int openmode(const char *path, int flags)   { return sys3(SYS_OPENMODE, (int)path, flags, 0); }
+static inline int listdir(const char *path, int idx, char *name) { return sys3(SYS_LISTDIR, (int)path, idx, (int)name); }
 static inline int close(int fd)                           { return sys1(SYS_CLOSE, fd); }
 static inline int getc(void)                              { return sys0(SYS_GETC); }
 static inline int wait(int pid)                           { return sys1(SYS_WAIT, pid); }

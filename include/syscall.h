@@ -32,6 +32,15 @@
 #define SYS_KILL    24  // kill(pid)                   -> 0, or -1 if no such running task
 #define SYS_PIPE    25  // pipe(int fds[2])            -> 0; fds[0] = read end, fds[1] = write end
 #define SYS_EXEC2   26  // exec2(path, argv, int fds[3]) -> pid; child fd i = caller's fd fds[i], -1 = inherit
+#define SYS_OPENMODE 27 // openmode(const char *path, int flags) -> fd, or -1
+#define SYS_LISTDIR  28  // listdir(const char *path, uint idx, char *name[128]) -> 0, or -1 at end
+
+// Flags for SYS_OPENMODE (backward-compatible: SYS_OPEN is read-only).
+#define O_RDONLY  0x0
+#define O_WRONLY  0x1
+#define O_RDWR    0x2
+#define O_CREATE  0x4
+#define O_TRUNC   0x8
 
 // Returned by SYS_MOUSE: cursor position in framebuffer coordinates,
 // buttons bit0=left bit1=right bit2=middle.

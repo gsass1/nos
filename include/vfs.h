@@ -26,6 +26,15 @@ typedef void (*close_fsnode_t)(struct fs_node *);
 typedef struct dirent *(*readdir_fsnode_t)(struct fs_node *, uint32_t);
 typedef struct fs_node *(*finddir_fsnode_t)(struct fs_node *, char *);
 
+// Optional filesystem operations stored via the fs_node `impl` field (cast to
+// a pointer on 32-bit). Lets a filesystem support create/truncate without
+// growing struct fs_node.
+struct fs_ops
+{
+    struct fs_node *(*create)(struct fs_node *dir, const char *name);
+    int (*truncate)(struct fs_node *node);
+};
+
 struct fs_node
 {
     char name[128];     // The filename.
@@ -42,7 +51,7 @@ struct fs_node
     close_fsnode_t close;
     readdir_fsnode_t readdir;
     finddir_fsnode_t finddir;
-    struct fs_node *ptr; // Used by mountpoints and symlinks.
+    void *ptr; // Mountpoint: mounted root fs_node. ext2: struct ext2_mount* context.
 };
 
 extern struct fs_node *fs_root;
@@ -53,5 +62,18 @@ void vfs_open(struct fs_node *node, uint8_t read, uint8_t write);
 void vfs_close(struct fs_node *node);
 struct dirent *vfs_readdir(struct fs_node *node, uint32_t index);
 struct fs_node *vfs_finddir(struct fs_node *node, char *name);
+
+// Hierarchical path resolution: walk '/'-separated components from fs_root,
+// following mountpoints (nodes with FS_MOUNTPOINT set, ptr = mounted root).
+// Returns the resolved node, or 0 if any component is not found.
+struct fs_node *vfs_resolve(const char *path);
+
+// Create a file named `name` in directory `dir`. Returns the new node, or 0
+// if the directory does not support creation.
+struct fs_node *vfs_create(struct fs_node *dir, const char *name);
+
+// Truncate a file node to zero length (free all data blocks).
+// Returns 0 on success, -1 on failure (e.g. unsupported indirect pointers).
+int vfs_truncate(struct fs_node *node);
 
 #endif

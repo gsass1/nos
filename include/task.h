@@ -24,6 +24,13 @@ enum fd_type
     FD_PIPE_W,  // write end of a pipe
 };
 
+// OR'd into an FD_FILE type to mark access mode. sys_write rejects FD_FILE
+// without FD_WRITABLE; sys_read rejects FD_FILE with FD_WRITEONLY. Encoded
+// in the upper bits of `type` so no struct size change is needed.
+#define FD_WRITABLE   0x100
+#define FD_WRITEONLY  0x200
+#define FD_TYPE(t)    ((t) & 0xFF)
+
 struct file
 {
     int type;

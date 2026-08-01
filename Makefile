@@ -20,7 +20,7 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr initrd/disktest
 OBJ=boot/boot.o \
 	drivers/keyboard.o \
 	drivers/mouse.o \
@@ -31,6 +31,7 @@ OBJ=boot/boot.o \
 kernel/copy_page_physical.o \
 kernel/gdt.o \
 kernel/elf.o \
+kernel/ext2.o \
 kernel/fb.o \
 kernel/idt.o \
 kernel/initrd.o \
@@ -83,6 +84,9 @@ kernel/gdt.o: kernel/gdt.c
 
 kernel/elf.o: kernel/elf.c
 	$(CC) -c kernel/elf.c -o kernel/elf.o $(CFLAGS)
+
+kernel/ext2.o: kernel/ext2.c
+	$(CC) -c kernel/ext2.c -o kernel/ext2.o $(CFLAGS)
 
 kernel/fb.o: kernel/fb.c
 	$(CC) -c kernel/fb.c -o kernel/fb.o $(CFLAGS)
@@ -212,11 +216,15 @@ initrd/badptr: user/badptr.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/badptr.c -o user/badptr.o $(CFLAGS)
 	$(LD) -T user/user.ld user/badptr.o -o initrd/badptr
 
+initrd/disktest: user/disktest.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/disktest.c -o user/disktest.o $(CFLAGS)
+	$(LD) -T user/user.ld user/disktest.o -o initrd/disktest
+
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr disktest
 
 initrd: $(INITRD)
 
@@ -230,9 +238,13 @@ run: $(BIN) $(INITRD)
 test: $(BIN) $(INITRD)
 	python3 tests/run_tests.py
 	python3 tests/run_ata_tests.py
+	python3 tests/run_ext2_tests.py
 
 test-ata: $(BIN) $(INITRD)
 	python3 tests/run_ata_tests.py
+
+test-ext2: $(BIN) $(INITRD)
+	python3 tests/run_ext2_tests.py
 
 clean:
 	rm -f $(OBJ)
