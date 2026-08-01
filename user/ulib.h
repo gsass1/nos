@@ -82,6 +82,19 @@ static inline int cstat(int cid)                      { return sys1(SYS_CSTAT, c
 static inline int cclose(int cid)                     { return sys1(SYS_CCLOSE, cid); }
 static inline int kill(int pid)                       { return sys1(SYS_KILL, pid); }
 
+// DNS A lookup: writes the address (wire order, as SYS_CONNECT wants it)
+// to *ip. Returns 0, or -1 (no NIC, bad name, or resolver timeout).
+static inline int resolve(const char *name, unsigned *ip)
+{
+    return sys3(SYS_RESOLVE, (int)name, (int)ip, 0);
+}
+
+// Open a TCP connection; returns a socket fd to read/write/close, or -1.
+static inline int connect(unsigned ip, int port)
+{
+    return sys3(SYS_CONNECT, (int)ip, port, 0);
+}
+
 // Enters graphics mode; returns the mapped 32bpp framebuffer, or (void *)-1.
 static inline void *fbmap(void)
 {

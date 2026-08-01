@@ -9,8 +9,10 @@
 #include <pipe.h>
 #include <pit.h>
 #include <serial.h>
+#include <net.h>
 #include <string.h>
 #include <task.h>
+#include <tcp.h>
 #include <vfs.h>
 #include <vga.h>
 
@@ -75,6 +77,8 @@ static int sys_write(int fd, const char *buf, uint32_t len)
             serial_write_c(buf[i]);
         }
         return (int)len;
+    case FD_SOCKET:
+        return tcp_send(f->sock, buf, len);
     default:
         return -1; // initrd files are read-only; FD_NONE is nothing at all
     }
@@ -183,6 +187,8 @@ static int sys_read(int fd, char *buf, uint32_t len)
     }
     case FD_PIPE_R:
         return pipe_read(f->pipe, buf, len);
+    case FD_SOCKET:
+        return tcp_recv(f->sock, buf, len);
     default:
         return -1;
     }
@@ -387,6 +393,41 @@ static int sys_execc(const char *path, const char *const *argv)
     return cid;
 }
 
+// DNS A lookup; blocks through the resolver exchange. Fails cleanly when no
+// NIC was found at boot.
+static int sys_resolve(const char *name, uint32_t *ip_out)
+{
+    if (!user_str_ok(name, 128) || !user_ok(ip_out, sizeof(*ip_out), 1)) {
+        return -1;
+    }
+    return dns_resolve(name, ip_out);
+}
+
+// Open a TCP connection; blocks through the handshake. The socket becomes a
+// regular fd: read/write stream data, close sends FIN, and the ends are
+// refcounted so exec2/inheritance work like they do for pipes.
+static int sys_connect(uint32_t ip, uint16_t port)
+{
+    struct task *t = task_current();
+    int fd = -1;
+    for (int i = 3; i < TASK_MAX_FILES; i++) { // 0-2 are stdio
+        if (t->files[i].type == FD_NONE) {
+            fd = i;
+            break;
+        }
+    }
+    if (fd < 0) {
+        return -1;
+    }
+    int s = tcp_connect(ip, port);
+    if (s < 0) {
+        return -1;
+    }
+    t->files[fd].type = FD_SOCKET;
+    t->files[fd].sock = s;
+    return fd;
+}
+
 static int sys_font(uint8_t *buf)
 {
     const uint8_t *font = fb_font_data();
@@ -506,6 +547,13 @@ void syscall_dispatch(struct regs *r)
         r->eax = (uint32_t)sys_exec2((const char *)r->ebx,
                                      (const char *const *)r->ecx,
                                      (const int *)r->edx);
+        break;
+    case SYS_RESOLVE:
+        r->eax = (uint32_t)sys_resolve((const char *)r->ebx,
+                                       (uint32_t *)r->ecx);
+        break;
+    case SYS_CONNECT:
+        r->eax = (uint32_t)sys_connect(r->ebx, (uint16_t)r->ecx);
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

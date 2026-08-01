@@ -101,7 +101,8 @@ flowchart TD
     F --> G["heap_init<br/>mm_paging_init(mem_size)"]
     G --> H["ata_init<br/>IDENTIFY disks"]
     H --> H2["kbd_init"]
-    H2 --> I["initrd_init -> fs_root<br/>sym_init"]
+    H2 --> H3["net_init<br/>(rtl8139 probe + IPv4/TCP stack)"]
+    H3 --> I["initrd_init -> fs_root<br/>sym_init"]
     I --> J["syscall_init<br/>(int 0x80 gate)"]
     J --> K["tasking_init<br/>(kernel_task adopts boot stack)"]
     K --> L["elf_exec('sh')<br/>load + run the shell"]
@@ -438,6 +439,7 @@ in memory. The initrd currently holds `symtable`, `hello`, and `sh`.
 | Serial  | `drivers/serial.c`  | COM1; mirrors console output (used for logging/tests) |
 | PIT     | `kernel/pit.c`      | 200 Hz timer; IRQ0 drives the scheduler |
 | ATA     | `drivers/ata.c`     | Legacy primary/secondary PIO; IDENTIFY plus bounded polling LBA28 reads, writes, and cache flush |
+| Ethernet| `drivers/rtl8139.c` | RTL8139 over PCI; RX ring drained in IRQ context into `net_rx`, 4 bounce-buffered TX slots |
 
 `kprintf` writes to both VGA and serial (guarded by a mutex); `mprintf` prefixes
 a module tag; `panic` prints a message and a symbolic stack trace, then halts.
@@ -447,6 +449,18 @@ and validates every request against the device capacity before dispatching it.
 ATA channels are mutex-serialized, and device interrupts stay disabled because
 this first storage path uses bounded polling. The initrd remains the root
 filesystem; no raw disk interface is exposed to ring 3.
+
+**Networking** (`kernel/net.c`, `kernel/tcp.c`): a minimal IPv4 stack sized
+for QEMU's user-mode (slirp) topology -- static config `10.0.2.15/24`, every
+destination reached through the gateway MAC (`10.0.2.2`), DNS at `10.0.2.3`.
+All receive-side protocol processing (ethernet demux, ARP, IP, UDP/DNS
+matching, TCP input) runs in the NIC's IRQ handler with interrupts off;
+task-side senders share state with it under `irq_save`. TCP is client-only
+with stop-and-wait transmission, and every retransmission timer is a blocking
+task-context loop polling `timer_ticks` (the `sys_sleep` pattern) -- there are
+no timer callbacks. Sockets surface as refcounted `FD_SOCKET` fds created by
+`SYS_CONNECT` (plus `SYS_RESOLVE` for DNS) and are then plain `read`/`write`/
+`close` streams; `user/wget.c` does an HTTP/1.0 GET over one.
 
 ---
 
@@ -476,6 +490,9 @@ filesystem; no raw disk interface is exposed to ring 3.
 | `kernel/pic.c` | 8259 PIC remap |
 | `kernel/pit.c` | Timer (200 Hz) |
 | `kernel/block.c`, `drivers/ata.c` | Block-device registry and polling ATA PIO |
+| `kernel/pci.c` | PCI config-space access (mechanism #1) |
+| `drivers/rtl8139.c` | RTL8139 ethernet driver |
+| `kernel/net.c`, `kernel/tcp.c` | Ethernet/ARP/IPv4/UDP/DNS and client TCP |
 | `kernel/interrupt.S` | ISR stubs, `SAVE/RESTORE_REGS`, `task_switch`, `_asm_syscall` |
 | `kernel/isr.c` | C exception/IRQ handlers |
 | `kernel/paging.c` | Frame allocator, page tables, `clone/free_directory` |

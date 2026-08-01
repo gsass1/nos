@@ -8,6 +8,7 @@
 #include <keyboard.h>
 #include <mm.h>
 #include <mouse.h>
+#include <net.h>
 #include <pic.h>
 #include <pit.h>
 #include <serial.h>
@@ -105,6 +106,10 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	// PS/2 keyboard and mouse initalization
     kbd_init();
     mouse_init();
+
+	// PCI ethernet (QEMU rtl8139) + the IPv4/TCP stack. Boots fine without a
+	// NIC; the net syscalls then just fail cleanly.
+    net_init();
 
 	// Probe for the QEMU/Bochs display device (framebuffer for SYS_FBMAP).
     fb_init();
