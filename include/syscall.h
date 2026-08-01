@@ -20,6 +20,17 @@
 #define SYS_FBMAP   12  // fbmap(void)                 -> fb pointer (enables graphics mode), or -1
 #define SYS_FBOFF   13  // fboff(void)                 -> 0; back to text mode
 #define SYS_SLEEP   14  // sleep(uint ms)              -> 0 after at least ms elapsed
+#define SYS_MOUSE   15  // mouse(struct mouse_state *out) -> 0, or -1
+#define SYS_POLLC   16  // pollc(void)                 -> key, or -1 if none pending
+
+// Returned by SYS_MOUSE: cursor position in framebuffer coordinates,
+// buttons bit0=left bit1=right bit2=middle.
+struct mouse_state
+{
+    int32_t x;
+    int32_t y;
+    uint32_t buttons;
+};
 
 // Returned by SYS_FBINFO. pitch is in bytes; pixels are 32-bit 0x00RRGGBB.
 struct fb_info

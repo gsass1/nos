@@ -1,4 +1,4 @@
-.global _asm_default_int, _asm_reserved_int, _asm_exc_DIV0, _asm_exc_DEBUG, _asm_exc_BP, _asm_exc_NOMATH, _asm_exc_MF, _asm_exc_TSS, _asm_exc_SWAP, _asm_exc_AC, _asm_exc_MC, _asm_exc_XM, _asm_exc_NMI, _asm_exc_OVRFLW, _asm_exc_BOUNDS, _asm_exc_OPCODE, _asm_exc_DOUBLEF, _asm_exc_STACKF, _asm_exc_GP, _asm_exc_PF, _asm_irq_0, _asm_irq_1, _asm_irq_7, task_switch, _asm_syscall
+.global _asm_default_int, _asm_reserved_int, _asm_exc_DIV0, _asm_exc_DEBUG, _asm_exc_BP, _asm_exc_NOMATH, _asm_exc_MF, _asm_exc_TSS, _asm_exc_SWAP, _asm_exc_AC, _asm_exc_MC, _asm_exc_XM, _asm_exc_NMI, _asm_exc_OVRFLW, _asm_exc_BOUNDS, _asm_exc_OPCODE, _asm_exc_DOUBLEF, _asm_exc_STACKF, _asm_exc_GP, _asm_exc_PF, _asm_irq_0, _asm_irq_1, _asm_irq_7, _asm_irq_12, task_switch, _asm_syscall
 
 .macro  SAVE_REGS
     pushad
@@ -192,6 +192,17 @@ _asm_irq_1:
 _asm_irq_7:
     SAVE_REGS
     call isr_spurious
+    RESTORE_REGS
+    iret
+
+# IRQ12 (PS/2 mouse) arrives via the slave PIC: EOI must go to BOTH the slave
+# and the master (which sees it as the IRQ2 cascade).
+_asm_irq_12:
+    SAVE_REGS
+    call mouse_irq
+    mov al,0x20
+    out 0xA0,al
+    out 0x20,al
     RESTORE_REGS
     iret
 

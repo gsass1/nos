@@ -4,6 +4,7 @@
 #include <idt.h>
 #include <kernel.h>
 #include <keyboard.h>
+#include <mouse.h>
 #include <pit.h>
 #include <serial.h>
 #include <string.h>
@@ -218,6 +219,22 @@ static int sys_sleep(uint32_t ms)
     return 0;
 }
 
+static int sys_mouse(struct mouse_state *out)
+{
+    if (!out) {
+        return -1;
+    }
+    mouse_state(&out->x, &out->y, &out->buttons);
+    return 0;
+}
+
+// Non-blocking keyboard read for GUI event loops: next key or -1.
+static int sys_pollc(void)
+{
+    char c = kbd_getc();
+    return c ? (unsigned char)c : -1;
+}
+
 void syscall_dispatch(struct regs *r)
 {
     switch (r->eax) {
@@ -267,6 +284,12 @@ void syscall_dispatch(struct regs *r)
         break;
     case SYS_SLEEP:
         r->eax = (uint32_t)sys_sleep(r->ebx);
+        break;
+    case SYS_MOUSE:
+        r->eax = (uint32_t)sys_mouse((struct mouse_state *)r->ebx);
+        break;
+    case SYS_POLLC:
+        r->eax = (uint32_t)sys_pollc();
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

@@ -56,6 +56,8 @@ static inline void *sbrk(int incr)
 static inline int fbinfo(struct fb_info *out) { return sys1(SYS_FBINFO, (int)out); }
 static inline int fboff(void)                 { return sys0(SYS_FBOFF); }
 static inline int sleep(int ms)               { return sys1(SYS_SLEEP, ms); }
+static inline int mouse(struct mouse_state *m){ return sys1(SYS_MOUSE, (int)m); }
+static inline int pollc(void)                 { return sys0(SYS_POLLC); }
 
 // Enters graphics mode; returns the mapped 32bpp framebuffer, or (void *)-1.
 static inline void *fbmap(void)

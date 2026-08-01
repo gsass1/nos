@@ -43,10 +43,9 @@ void pic_init(void)
     outb(0x21, ICW4_8086);
     outb(0xA1, ICW4_8086);
 
-    // Mask everything except IRQ0 (timer) and IRQ1 (keyboard). We have no
-    // handlers (or slave EOI) for anything else; with all lines unmasked a
-    // single slave interrupt (e.g. IRQ12 from the PS/2 mouse) would never be
-    // acknowledged and wedge the slave PIC permanently.
-    outb(0x21, 0xFC);
-    outb(0xA1, 0xFF);
+    // Mask everything except IRQ0 (timer), IRQ1 (keyboard), IRQ2 (the slave
+    // cascade) and IRQ12 (PS/2 mouse). Unhandled lines stay masked: their
+    // handlers wouldn't EOI properly and would wedge the PIC.
+    outb(0x21, 0xF8);
+    outb(0xA1, 0xEF);
 }

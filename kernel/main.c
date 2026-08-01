@@ -6,6 +6,7 @@
 #include <kernel.h>
 #include <keyboard.h>
 #include <mm.h>
+#include <mouse.h>
 #include <pic.h>
 #include <pit.h>
 #include <serial.h>
@@ -94,8 +95,9 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
                         : 0x1000000;
     mm_paging_init(mem_size);
 
-	// PS/2 keyboard initalization
+	// PS/2 keyboard and mouse initalization
     kbd_init();
+    mouse_init();
 
 	// Probe for the QEMU/Bochs display device (framebuffer for SYS_FBMAP).
     fb_init();

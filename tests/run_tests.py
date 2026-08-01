@@ -28,6 +28,8 @@ WAIT_TIMEOUT = 30  # seconds per marker; CI runners can be slow
 KEYMAP = {" ": "spc"}
 for _c in "abcdefghijklmnopqrstuvwxyz0123456789":
     KEYMAP[_c] = _c
+for _c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    KEYMAP[_c] = "shift-" + _c.lower()
 
 failures = []
 
@@ -184,6 +186,24 @@ def main():
         sh.run("cat", ["usage: cat", "[exit status 1]"], "cat usage")
         sh.run("nosuchthing", ["unknown command"], "unknown command")
 
+        # Shift handling in the keyboard driver: typed capitals echo back.
+        sh.run("Hello World", ["unknown command: Hello"], "shift typing")
+
+        # Mouse: inject movement and a left click through the monitor while
+        # mtest polls SYS_MOUSE; it reports each state change.
+        sh.type_line("mtest")
+        if sh.wait_for("mtest: start", "mtest start"):
+            time.sleep(0.3)
+            sh.monitor("mouse_move 100 50")
+            time.sleep(0.3)
+            sh.monitor("mouse_button 1")
+            time.sleep(0.3)
+            sh.monitor("mouse_button 0")
+            sh.wait_for("mtest: x=", "mouse movement reported")
+            sh.wait_for("b=1", "mouse left button reported")
+            sh.wait_for("mtest: done", "mtest done")
+            sh.wait_for("nsh$", "prompt after mtest")
+
         # Fault isolation: crash dies to a ring-3 page fault (error bit 2 set =
         # user-mode access) and the shell survives to run another command.
         sh.run(
@@ -228,7 +248,7 @@ def main():
             print("  - " + f)
         return 1
     print("PASS (boot, ls, exec/wait, argv, file io, sbrk, error paths, "
-          "fault isolation, vga screen)")
+          "fault isolation, shift keys, mouse, framebuffer, vga screen)")
     return 0
 
 

@@ -20,9 +20,10 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/fbtest
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/fbtest initrd/mtest
 OBJ=boot/boot.o \
 drivers/keyboard.o \
+drivers/mouse.o \
 drivers/serial.o \
 kernel/copy_page_physical.o \
 kernel/gdt.o \
@@ -54,6 +55,9 @@ boot/boot.o: boot/boot.S
 
 drivers/keyboard.o: drivers/keyboard.c
 	$(CC) -c drivers/keyboard.c -o drivers/keyboard.o $(CFLAGS)
+
+drivers/mouse.o: drivers/mouse.c
+	$(CC) -c drivers/mouse.c -o drivers/mouse.o $(CFLAGS)
 
 drivers/serial.o: drivers/serial.c
 	$(CC) -c drivers/serial.c -o drivers/serial.o $(CFLAGS)
@@ -154,11 +158,15 @@ initrd/fbtest: user/fbtest.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/fbtest.c -o user/fbtest.o $(CFLAGS)
 	$(LD) -T user/user.ld user/fbtest.o -o initrd/fbtest
 
+initrd/mtest: user/mtest.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/mtest.c -o user/mtest.o $(CFLAGS)
+	$(LD) -T user/user.ld user/mtest.o -o initrd/mtest
+
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat fbtest
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat fbtest mtest
 
 initrd: $(INITRD)
 

@@ -27,6 +27,7 @@ extern  void _asm_exc_PF(void);
 extern  void _asm_irq_0(void);
 extern  void _asm_irq_1(void);
 extern  void _asm_irq_7(void);
+extern  void _asm_irq_12(void);
 
 struct idt_entry idt_entries[256];
 struct idt_ptr idt_ptr;
@@ -93,6 +94,8 @@ void idt_init(void)
     idt_set_gate(33, (uint32_t) _asm_irq_1, 0x08, 0x8E);
     // Spurious IRQ7 arrives on vector 32+7=39 (gate 40 would be IRQ8).
     idt_set_gate(39, (uint32_t) _asm_irq_7, 0x08, 0x8E);
+    // Slave PIC is based at 0x70 (pic.c), so IRQ12 = vector 0x74.
+    idt_set_gate(0x74, (uint32_t) _asm_irq_12, 0x08, 0x8E);
 
     asm volatile("lidt %0" : : "m"(idt_ptr));
 }
