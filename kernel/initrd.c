@@ -8,7 +8,6 @@ MODULE("INRD");
 static struct fs_node *initrd_root;
 static struct fs_node *root_nodes;
 static struct fs_node *initrd_dev = 0;
-static struct dirent dirent;
 static uint32_t nroot_nodes;
 // The ext2 mountpoint node, or 0 if no disk is mounted. Set by main.c after
 // ext2_mount; appears as "disk" in the initrd root listing.
@@ -91,20 +90,19 @@ static uint32_t parse(void *ptr)
     return i;
 }
 
-static struct dirent *initrd_readdir(struct fs_node *node, uint32_t index)
+static int initrd_readdir(struct fs_node *node, uint32_t index,
+                          struct dirent *out)
 {
     if(node == initrd_root && index == 0) {
-        strcpy(dirent.name, "dev");
-        dirent.name[3] = 0;
-        dirent.inode = 0;
-        return &dirent;
+        strcpy(out->name, "dev");
+        out->inode = 0;
+        return 0;
     }
 
     if(node == initrd_root && ext2_mount_node && index == 1) {
-        strcpy(dirent.name, "disk");
-        dirent.name[4] = 0;
-        dirent.inode = 0;
-        return &dirent;
+        strcpy(out->name, "disk");
+        out->inode = 0;
+        return 0;
     }
 
     // For the root, file entries start after "dev" (and "disk" if mounted).
@@ -117,12 +115,11 @@ static struct dirent *initrd_readdir(struct fs_node *node, uint32_t index)
     }
 
     if(index < base || index - base >= nroot_nodes) {
-        return 0;
+        return -1;
     }
-    strcpy(dirent.name, root_nodes[index - base].name);
-    dirent.name[strlen(root_nodes[index - base].name)] = 0;
-    dirent.inode = root_nodes[index - base].inode;
-    return &dirent;
+    strcpy(out->name, root_nodes[index - base].name);
+    out->inode = root_nodes[index - base].inode;
+    return 0;
 }
 
 static struct fs_node *initrd_finddir(struct fs_node *node, char *name)
@@ -218,9 +215,21 @@ struct fs_node *initrd_init(void *ptr)
     uint32_t i;
     struct tar_header_chain *header = headers;
     for(i = 0; i < nroot_nodes; i++) {
-		mprintf(LOGLEVEL_DEBUG, "Added file: %s, inode: %d\n", header->tar_header->filename, i);
         memset(&root_nodes[i], 0, sizeof(root_nodes[i]));
-        strcpy(root_nodes[i].name, header->tar_header->filename);
+        // A tar name field holds up to 100 bytes and is NOT NUL-terminated
+        // when the name uses the full width -- an unbounded strcpy would run
+        // on into the following header fields and past the 128-byte name.
+        uint32_t nl = 0;
+        while (nl < sizeof(header->tar_header->filename) &&
+               header->tar_header->filename[nl]) {
+            nl++;
+        }
+        if (nl > sizeof(root_nodes[i].name) - 1) {
+            nl = sizeof(root_nodes[i].name) - 1;
+        }
+        memcpy(root_nodes[i].name, header->tar_header->filename, nl);
+        root_nodes[i].name[nl] = '\0';
+        mprintf(LOGLEVEL_DEBUG, "Added file: %s, inode: %d\n", root_nodes[i].name, i);
         root_nodes[i].length = header->size;
         root_nodes[i].inode = i;
         root_nodes[i].flags = FS_FILE;

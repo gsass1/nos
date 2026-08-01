@@ -125,12 +125,12 @@ static int sys_readdir(uint32_t index, char *name_out, uint32_t len)
     if (len == 0 || !user_ok(name_out, len, 1)) {
         return -1;
     }
-    struct dirent *node = vfs_readdir(fs_root, index);
-    if (!node) {
+    struct dirent de;
+    if (vfs_readdir(fs_root, index, &de) < 0) {
         return -1;
     }
     // Never write past the caller's buffer; truncate and always NUL-terminate.
-    strncpy(name_out, node->name, len - 1);
+    strncpy(name_out, de.name, len - 1);
     name_out[len - 1] = '\0';
     return 0;
 }
@@ -287,11 +287,11 @@ static int sys_listdir(const char *path, uint32_t index, char *name)
     if (!node) {
         return -1;
     }
-    struct dirent *de = vfs_readdir(node, index);
-    if (!de) {
+    struct dirent de;
+    if (vfs_readdir(node, index, &de) < 0) {
         return -1;
     }
-    strncpy(name, de->name, 127);
+    strncpy(name, de.name, 127);
     name[127] = '\0';
     return 0;
 }

@@ -23,12 +23,14 @@ typedef uint32_t (*read_fsnode_t)(struct fs_node *, uint32_t, uint32_t, uint8_t 
 typedef uint32_t (*write_fsnode_t)(struct fs_node *, uint32_t, uint32_t, uint8_t *);
 typedef void (*open_fsnode_t)(struct fs_node *);
 typedef void (*close_fsnode_t)(struct fs_node *);
-typedef struct dirent *(*readdir_fsnode_t)(struct fs_node *, uint32_t);
+// readdir fills the CALLER's dirent (returns 0, or -1 past the end). A
+// returned pointer to filesystem-internal storage would be overwritten by a
+// concurrent reader under preemption before the caller copies it out.
+typedef int (*readdir_fsnode_t)(struct fs_node *, uint32_t, struct dirent *);
 typedef struct fs_node *(*finddir_fsnode_t)(struct fs_node *, char *);
 
-// Optional filesystem operations stored via the fs_node `impl` field (cast to
-// a pointer on 32-bit). Lets a filesystem support create/truncate without
-// growing struct fs_node.
+// Optional filesystem operations (fs_node `ops`, may be NULL). Kept in a
+// side table so basic filesystems don't have to fill a wall of pointers.
 struct fs_ops
 {
     struct fs_node *(*create)(struct fs_node *dir, const char *name);
@@ -46,6 +48,7 @@ struct fs_node
     uint32_t inode;       // This is device-specific - provides a way for a filesystem to identify files.
     uint32_t length;      // Size of the file, in bytes.
     uint32_t impl;        // An implementation-defined number.
+    struct fs_ops *ops;   // Optional create/mkdir/truncate table, or NULL.
     read_fsnode_t read;
     write_fsnode_t write;
     open_fsnode_t open;
@@ -61,7 +64,9 @@ uint32_t vfs_read(struct fs_node *node, uint32_t offset, uint32_t size, uint8_t 
 uint32_t vfs_write(struct fs_node *node, uint32_t offset, uint32_t size, uint8_t *buffer);
 void vfs_open(struct fs_node *node, uint8_t read, uint8_t write);
 void vfs_close(struct fs_node *node);
-struct dirent *vfs_readdir(struct fs_node *node, uint32_t index);
+// Fill *out with the index'th entry of the directory. Returns 0 on success,
+// -1 past the end (or if the node is not a listable directory).
+int vfs_readdir(struct fs_node *node, uint32_t index, struct dirent *out);
 struct fs_node *vfs_finddir(struct fs_node *node, char *name);
 
 // Hierarchical path resolution: walk '/'-separated components from fs_root,

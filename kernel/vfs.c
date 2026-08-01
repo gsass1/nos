@@ -42,12 +42,12 @@ void vfs_close(struct fs_node *node)
     }
 }
 
-struct dirent *vfs_readdir(struct fs_node *node, uint32_t index)
+int vfs_readdir(struct fs_node *node, uint32_t index, struct dirent *out)
 {
     if((node->flags&0x7) == FS_DIRECTORY && node->readdir != 0) {
-        return node->readdir(node, index);
+        return node->readdir(node, index, out);
     } else {
-        return 0;
+        return -1;
     }
 }
 
@@ -106,36 +106,26 @@ struct fs_node *vfs_resolve(const char *path)
 
 struct fs_node *vfs_create(struct fs_node *dir, const char *name)
 {
-    if (!dir || (dir->flags & 0x7) != FS_DIRECTORY || !dir->impl) {
+    if (!dir || (dir->flags & 0x7) != FS_DIRECTORY || !dir->ops ||
+        !dir->ops->create) {
         return 0;
     }
-    struct fs_ops *ops = (struct fs_ops *)(dir->impl);
-    if (!ops->create) {
-        return 0;
-    }
-    return ops->create(dir, name);
+    return dir->ops->create(dir, name);
 }
 
 int vfs_truncate(struct fs_node *node)
 {
-    if (!node || !node->impl) {
+    if (!node || !node->ops || !node->ops->truncate) {
         return -1;
     }
-    struct fs_ops *ops = (struct fs_ops *)(node->impl);
-    if (ops->truncate) {
-        return ops->truncate(node);
-    }
-    return -1;
+    return node->ops->truncate(node);
 }
 
 int vfs_mkdir(struct fs_node *dir, const char *name)
 {
-    if (!dir || (dir->flags & 0x7) != FS_DIRECTORY || !dir->impl) {
+    if (!dir || (dir->flags & 0x7) != FS_DIRECTORY || !dir->ops ||
+        !dir->ops->mkdir) {
         return -1;
     }
-    struct fs_ops *ops = (struct fs_ops *)(dir->impl);
-    if (!ops->mkdir) {
-        return -1;
-    }
-    return ops->mkdir(dir, name);
+    return dir->ops->mkdir(dir, name);
 }

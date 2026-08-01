@@ -36,12 +36,28 @@ for _c in "abcdefghijklmnopqrstuvwxyz0123456789":
 for _c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
     KEYMAP[_c] = "shift-" + _c.lower()
 
+
+def keyname(ch):
+    """Map a command character to a QEMU sendkey name. An unmapped character
+    would be rejected by the monitor and surface much later as a confusing
+    missing-marker timeout, so fail loudly here instead."""
+    if ch not in KEYMAP:
+        raise KeyError(f"no sendkey mapping for character {ch!r}; extend KEYMAP")
+    return KEYMAP[ch]
+
+
 failures = []
 
 
 def check_tools():
+    """The suite skips when the ext2 host tools are missing (fine locally).
+    Set NOS_REQUIRE_EXT2_TOOLS=1 in CI so a runner image losing e2fsprogs
+    fails the build instead of silently dropping all ext2 coverage."""
     for tool in ("mke2fs", "e2fsck", "debugfs", "qemu-system-i386"):
         if not shutil.which(tool):
+            if os.environ.get("NOS_REQUIRE_EXT2_TOOLS"):
+                print(f"FAIL: required tool '{tool}' not found", file=sys.stderr)
+                sys.exit(1)
             print(f"SKIP: required tool '{tool}' not found", file=sys.stderr)
             return False
     return True
@@ -52,15 +68,21 @@ def create_image(path, srcdir):
     img = path
     with open(img, "wb") as f:
         f.truncate(4 * 1024 * 1024)  # 4 MB
-    subprocess.run(
-        [
-            "mke2fs", "-t", "ext2", "-b", "1024", "-r", "0",
-            "-O", "none", "-I", "128", "-N", "128",
-            "-d", srcdir, "-F", "-q", img,
-        ],
-        check=True,
-        capture_output=True,
-    )
+    common = [
+        "mke2fs", "-t", "ext2", "-b", "1024",
+        "-O", "none", "-I", "128", "-N", "128",
+        "-d", srcdir, "-F", "-q",
+    ]
+    # e2fsprogs >= 1.47.3 removed "-r 0" (and refuses -E revision=0 with any
+    # invocation we found). Older releases -- current CI runners -- accept
+    # "-r 0" directly; on newer ones, build the same feature-free filesystem
+    # as revision 1 and stamp the superblock back to revision 0 with debugfs
+    # (verified: e2fsck -fn is clean and all feature masks stay zero).
+    r = subprocess.run(common + ["-r", "0", img], capture_output=True)
+    if r.returncode != 0:
+        subprocess.run(common + [img], check=True, capture_output=True)
+        subprocess.run(["debugfs", "-w", "-R", "ssv rev_level 0", img],
+                       check=True, capture_output=True)
 
 
 def make_srcdir(path):
@@ -88,7 +110,7 @@ def boot_and_run(image, command, markers, desc):
             "-drive", f"file={image},format=raw,if=ide,index=0,media=disk",
         ],
         stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
         text=True,
     )
@@ -119,7 +141,7 @@ def boot_and_run(image, command, markers, desc):
 
         # Type the command.
         for ch in command:
-            proc.stdin.write("sendkey " + KEYMAP.get(ch, ch) + "\n")
+            proc.stdin.write("sendkey " + keyname(ch) + "\n")
             proc.stdin.flush()
             time.sleep(0.06)
         proc.stdin.write("sendkey ret\n")
@@ -144,17 +166,23 @@ def boot_and_run(image, command, markers, desc):
                 break
             time.sleep(0.2)
 
-        # Check what we got.
+        # Timed out: the marker+prompt condition never became true, so this
+        # is always a failure. Diagnose against the FULL log -- a short tail
+        # can both hide markers that did arrive earlier and, if every marker
+        # happens to fall inside it, make a timeout look like a pass.
         try:
             with open(SERIAL_LOG, "r", errors="replace") as f:
-                tail = f.read()[-600:]
+                data = f.read()
         except FileNotFoundError:
-            tail = ""
-        for m in markers:
-            if m not in tail:
-                failures.append(f"{desc}: missing {m!r} (serial tail: {tail!r})")
-                return False
-        return True
+            data = ""
+        tail = data[-600:]
+        missing = [m for m in markers if m not in data]
+        if missing:
+            failures.append(f"{desc}: missing {missing!r} (serial tail: {tail!r})")
+        else:
+            failures.append(
+                f"{desc}: markers seen but no prompt returned (serial tail: {tail!r})")
+        return False
     finally:
         proc.kill()
         proc.wait()
@@ -178,7 +206,7 @@ def boot_and_run_seq(image, commands, desc):
             "-drive", f"file={image},format=raw,if=ide,index=0,media=disk",
         ],
         stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
         text=True,
     )
@@ -210,7 +238,7 @@ def boot_and_run_seq(image, commands, desc):
         # Type each command, waiting for the next prompt.
         for cmd in commands:
             for ch in cmd:
-                proc.stdin.write("sendkey " + KEYMAP.get(ch, ch) + "\n")
+                proc.stdin.write("sendkey " + keyname(ch) + "\n")
                 proc.stdin.flush()
                 time.sleep(0.06)
             proc.stdin.write("sendkey ret\n")
@@ -271,7 +299,8 @@ def run_debugfs_cat(image, path, expected, desc):
     content = r.stdout
     if expected not in content:
         failures.append(
-            f"{desc}: debugfs cat {path}: expected {expected!r}, got {content!r}"
+            f"{desc}: debugfs cat {path}: expected {expected!r}, got {content!r} "
+            f"(rc={r.returncode}, stderr={r.stderr!r})"
         )
         return False
     return True
@@ -286,7 +315,7 @@ def run_debugfs_ls(image, path, expected_entry, desc):
     if expected_entry not in r.stdout:
         failures.append(
             f"{desc}: debugfs ls {path}: expected entry {expected_entry!r}, "
-            f"got {r.stdout!r}"
+            f"got {r.stdout!r} (rc={r.returncode}, stderr={r.stderr!r})"
         )
         return False
     return True
@@ -302,7 +331,7 @@ def run_debugfs_stat(image, path, expected_fields, desc):
         if field not in r.stdout:
             failures.append(
                 f"{desc}: debugfs stat {path}: expected {field!r}, "
-                f"got {r.stdout!r}"
+                f"got {r.stdout!r} (rc={r.returncode}, stderr={r.stderr!r})"
             )
             return False
     return True
@@ -325,7 +354,8 @@ def run_debugfs_link_count(image, path, desc):
                     return int(parts[1])
                 except ValueError:
                     pass
-    failures.append(f"{desc}: could not parse link count from {r.stdout!r}")
+    failures.append(f"{desc}: could not parse link count from {r.stdout!r} "
+                     f"(rc={r.returncode}, stderr={r.stderr!r})")
     return -1
 
 

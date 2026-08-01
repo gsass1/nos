@@ -143,17 +143,14 @@ struct ext2_mount
     uint32_t node_cache_size;
 };
 
-// --- Static dirent buffer (like initrd's single-entry approach) -------------
-
-static struct dirent s_dirent;
-
-// --- Filesystem operations tables (stored via fs_node->impl) ----------------
+// --- Filesystem operations tables (stored via fs_node->ops) -----------------
 
 static struct fs_ops ext2_dir_ops;
 static struct fs_ops ext2_file_ops;
 
 // Forward declarations for VFS callbacks.
-static struct dirent *ext2_readdir(struct fs_node *node, uint32_t index);
+static int ext2_readdir(struct fs_node *node, uint32_t index,
+                        struct dirent *out);
 static struct fs_node *ext2_finddir(struct fs_node *node, char *name);
 static uint32_t ext2_read_file(struct fs_node *node, uint32_t offset,
                                uint32_t size, uint8_t *buffer);
@@ -333,12 +330,23 @@ static uint32_t ext2_alloc_block(struct ext2_mount *m)
                 kfree(bm);
                 return 0;
             }
-            kfree(bm);
 
             m->sb.s_free_blocks_count--;
             m->gd.bg_free_blocks_count--;
-            ext2_write_superblock(m);
-            ext2_write_group_desc(m);
+            if (ext2_write_superblock(m) < 0 || ext2_write_group_desc(m) < 0) {
+                // Counters could not be persisted: undo the whole allocation
+                // (counts, then the bitmap bit) so the on-disk bitmap and
+                // free counts stay in agreement, and fail the allocation.
+                m->sb.s_free_blocks_count++;
+                m->gd.bg_free_blocks_count++;
+                ext2_write_superblock(m); // restore whichever half landed
+                ext2_write_group_desc(m);
+                bm[i / 8] &= ~(1 << (i % 8));
+                ext2_write_block(m, m->gd.bg_block_bitmap, bm);
+                kfree(bm);
+                return 0;
+            }
+            kfree(bm);
             return blk;
         }
     }
@@ -362,8 +370,15 @@ static void ext2_free_block(struct ext2_mount *m, uint32_t blk)
         if (ext2_write_block(m, m->gd.bg_block_bitmap, bm) < 0) { kfree(bm); return; }
         m->sb.s_free_blocks_count++;
         m->gd.bg_free_blocks_count++;
-        ext2_write_superblock(m);
-        ext2_write_group_desc(m);
+        if (ext2_write_superblock(m) < 0 || ext2_write_group_desc(m) < 0) {
+            // The bit is already clear on disk but the counts didn't land.
+            // Revert the in-memory counts to mirror disk: undercounting free
+            // space is the safe direction (fsck-fixable, never aliasing).
+            m->sb.s_free_blocks_count--;
+            m->gd.bg_free_blocks_count--;
+            ext2_write_superblock(m);
+            ext2_write_group_desc(m);
+        }
     }
     kfree(bm);
 }
@@ -382,14 +397,26 @@ static uint32_t ext2_alloc_inode(struct ext2_mount *m)
     for (uint32_t i = EXT2_FIRST_NORMAL_INO - 1; i < total; i++) {
         if (!(bm[i / 8] & (1 << (i % 8)))) {
             bm[i / 8] |= (1 << (i % 8));
-            int wr = ext2_write_block(m, m->gd.bg_inode_bitmap, bm);
-            kfree(bm);
-            if (wr < 0) return 0;
+            if (ext2_write_block(m, m->gd.bg_inode_bitmap, bm) < 0) {
+                kfree(bm);
+                return 0;
+            }
 
             m->sb.s_free_inodes_count--;
             m->gd.bg_free_inodes_count--;
-            ext2_write_superblock(m);
-            ext2_write_group_desc(m);
+            if (ext2_write_superblock(m) < 0 || ext2_write_group_desc(m) < 0) {
+                // Same undo dance as ext2_alloc_block: restore the counts,
+                // clear the bit again, fail the allocation.
+                m->sb.s_free_inodes_count++;
+                m->gd.bg_free_inodes_count++;
+                ext2_write_superblock(m);
+                ext2_write_group_desc(m);
+                bm[i / 8] &= ~(1 << (i % 8));
+                ext2_write_block(m, m->gd.bg_inode_bitmap, bm);
+                kfree(bm);
+                return 0;
+            }
+            kfree(bm);
             return i + 1;
         }
     }
@@ -411,8 +438,13 @@ static void ext2_free_inode(struct ext2_mount *m, uint32_t ino)
         if (ext2_write_block(m, m->gd.bg_inode_bitmap, bm) < 0) { kfree(bm); return; }
         m->sb.s_free_inodes_count++;
         m->gd.bg_free_inodes_count++;
-        ext2_write_superblock(m);
-        ext2_write_group_desc(m);
+        if (ext2_write_superblock(m) < 0 || ext2_write_group_desc(m) < 0) {
+            // Mirror disk on failure, as in ext2_free_block: undercount free.
+            m->sb.s_free_inodes_count--;
+            m->gd.bg_free_inodes_count--;
+            ext2_write_superblock(m);
+            ext2_write_group_desc(m);
+        }
     }
     kfree(bm);
 }
@@ -439,13 +471,17 @@ static uint32_t ext2_read_data(struct ext2_mount *m, struct ext2_inode *in,
                                uint32_t offset, uint32_t size, uint8_t *buf)
 {
     if (offset >= in->i_size) return 0;
-    if (offset + size > in->i_size) size = in->i_size - offset;
+    // Clamp without computing offset + size: that sum can wrap in 32 bits
+    // and would then skip the clamp entirely. offset < i_size holds here,
+    // so i_size - offset cannot underflow.
+    if (size > in->i_size - offset) size = in->i_size - offset;
 
     uint32_t bs = m->block_size;
     uint32_t ptrs_per_block = bs / 4;
     uint8_t *blk = kmalloc(bs);
     if (!blk) return 0;
     uint8_t *indirect = 0;
+    int indirect_loaded = 0;
     uint32_t got = 0;
 
     while (got < size) {
@@ -465,7 +501,12 @@ static uint32_t ext2_read_data(struct ext2_mount *m, struct ext2_inode *in,
                     indirect = kmalloc(bs);
                     if (!indirect) break;
                 }
-                if (ext2_read_block(m, in->i_block[12], indirect) < 0) break;
+                // The indirect block is loaded once for the whole read, not
+                // once per iterated block.
+                if (!indirect_loaded) {
+                    if (ext2_read_block(m, in->i_block[12], indirect) < 0) break;
+                    indirect_loaded = 1;
+                }
                 phys = ((uint32_t *)indirect)[bi - 12];
             }
         } else {
@@ -507,9 +548,9 @@ static uint32_t ext2_write_data(struct ext2_mount *m, uint32_t ino,
     uint8_t *blk = kmalloc(bs);
     if (!blk) return 0;
     uint8_t *indirect = 0;
+    int indirect_loaded = 0;
     uint32_t wrote = 0;
     int dirty_indirect = 0;
-    int ok = 1;
 
     while (wrote < size) {
         uint32_t foff = offset + wrote;
@@ -523,27 +564,36 @@ static uint32_t ext2_write_data(struct ext2_mount *m, uint32_t ino,
             phys = in->i_block[bi];
             if (phys == 0) {
                 phys = ext2_alloc_block(m);
-                if (!phys) { ok = 0; break; }
+                if (!phys) break;
                 in->i_block[bi] = phys;
                 in->i_blocks += bs / 512;
             }
         } else if (bi < 12 + ptrs_per_block) {
-            if (in->i_block[12] == 0) {
-                in->i_block[12] = ext2_alloc_block(m);
-                if (!in->i_block[12]) { ok = 0; break; }
-                in->i_blocks += bs / 512;
-            }
-            if (!ext2_data_blk_ok(m, in->i_block[12])) { ok = 0; break; }
             if (!indirect) {
                 indirect = kmalloc(bs);
-                if (!indirect) { ok = 0; break; }
+                if (!indirect) break;
             }
-            if (ext2_read_block(m, in->i_block[12], indirect) < 0) { ok = 0; break; }
+            if (in->i_block[12] == 0) {
+                in->i_block[12] = ext2_alloc_block(m);
+                if (!in->i_block[12]) break;
+                in->i_blocks += bs / 512;
+                // A fresh block is zeroed on disk; start from an empty map.
+                memset(indirect, 0, bs);
+                indirect_loaded = 1;
+            }
+            if (!ext2_data_blk_ok(m, in->i_block[12])) break;
+            // Load the indirect block ONCE for the whole write. Re-reading
+            // it per iteration would discard the entries stored by earlier
+            // iterations of this same loop -- silently losing their blocks.
+            if (!indirect_loaded) {
+                if (ext2_read_block(m, in->i_block[12], indirect) < 0) break;
+                indirect_loaded = 1;
+            }
             uint32_t *ents = (uint32_t *)indirect;
             phys = ents[bi - 12];
             if (phys == 0) {
                 phys = ext2_alloc_block(m);
-                if (!phys) { ok = 0; break; }
+                if (!phys) break;
                 ents[bi - 12] = phys;
                 dirty_indirect = 1;
                 in->i_blocks += bs / 512;
@@ -552,33 +602,41 @@ static uint32_t ext2_write_data(struct ext2_mount *m, uint32_t ino,
             break;
         }
 
-        if (!ext2_data_blk_ok(m, phys)) { ok = 0; break; }
+        if (!ext2_data_blk_ok(m, phys)) break;
         // Read-modify-write the target block.
-        if (ext2_read_block(m, phys, blk) < 0) { ok = 0; break; }
+        if (ext2_read_block(m, phys, blk) < 0) break;
         memcpy(blk + in_blk, buf + wrote, chunk);
-        if (ext2_write_block(m, phys, blk) < 0) { ok = 0; break; }
+        if (ext2_write_block(m, phys, blk) < 0) break;
         wrote += chunk;
     }
+    kfree(blk);
 
-    // Persist the indirect block if it was modified.
+    // Persist the indirect block whenever it gained entries -- also after a
+    // mid-loop failure, or the blocks reached through fresh entries would be
+    // unreachable (partial progress reported below yet reading back zeros).
+    // If this write fails the linkage is lost, so no progress can be
+    // reported: the allocated blocks leak (bitmap-only), which is the
+    // documented I/O-fault failure mode, but nothing aliases or corrupts.
     if (indirect) {
-        if (dirty_indirect && ok && ext2_data_blk_ok(m, in->i_block[12])) {
-            if (ext2_write_block(m, in->i_block[12], indirect) < 0) {
-                ok = 0;
-            }
-        }
+        int lost = dirty_indirect &&
+                   (!ext2_data_blk_ok(m, in->i_block[12]) ||
+                    ext2_write_block(m, in->i_block[12], indirect) < 0);
         kfree(indirect);
+        if (lost) return 0;
     }
 
-    // Update i_size and persist the inode. If metadata linkage failed, do not
-    // report the bytes as successfully written.
+    // Report the bytes that are durably on disk. wrote counts only chunks
+    // whose data-block writes succeeded; i_size grows to exactly that, so a
+    // partial write (loop break above) returns its true progress instead of
+    // 0 -- a caller that trusts 0 == "nothing written" must not be lied to.
+    if (wrote == 0) return 0; // no progress; in-memory inode changes are dropped
     if (offset + wrote > in->i_size) in->i_size = offset + wrote;
     if (ext2_write_inode(m, ino, in) < 0) {
-        ok = 0;
+        // The size/block map never landed: newly linked blocks leak and
+        // extension bytes are unreachable. Report failure; an identical
+        // retry at the same offset is idempotent.
+        return 0;
     }
-    if (!ok) { kfree(blk); return 0; }
-
-    kfree(blk);
     return wrote;
 }
 
@@ -740,12 +798,12 @@ static struct fs_node *ext2_get_node(struct ext2_mount *m, uint32_t ino,
         fn->flags = FS_DIRECTORY;
         fn->readdir = ext2_readdir;
         fn->finddir = ext2_finddir;
-        fn->impl = (uint32_t)&ext2_dir_ops;
+        fn->ops = &ext2_dir_ops;
     } else {
         fn->flags = FS_FILE;
         fn->read = ext2_read_file;
         fn->write = ext2_write_file;
-        fn->impl = (uint32_t)&ext2_file_ops;
+        fn->ops = &ext2_file_ops;
     }
 
     m->node_cache[idx] = fn;
@@ -754,7 +812,8 @@ static struct fs_node *ext2_get_node(struct ext2_mount *m, uint32_t ino,
 
 // --- VFS callbacks ----------------------------------------------------------
 
-static struct dirent *ext2_readdir(struct fs_node *node, uint32_t index)
+static int ext2_readdir(struct fs_node *node, uint32_t index,
+                        struct dirent *out)
 {
     struct ext2_mount *m = node->ptr;
     mutex_lock(&m->lock);
@@ -762,21 +821,21 @@ static struct dirent *ext2_readdir(struct fs_node *node, uint32_t index)
     struct ext2_inode din;
     if (ext2_read_inode(m, node->inode, &din) < 0) {
         mutex_unlock(&m->lock);
-        return 0;
+        return -1;
     }
     if (!ext2_inode_pointers_ok(m, &din)) {
         mutex_unlock(&m->lock);
-        return 0;
+        return -1;
     }
 
     uint32_t bs = m->block_size;
     uint8_t *buf = kmalloc(bs);
-    if (!buf) { mutex_unlock(&m->lock); return 0; }
+    if (!buf) { mutex_unlock(&m->lock); return -1; }
     uint32_t cur = 0;
-    struct dirent *result = 0;
+    int found = 0;
 
     uint32_t dir_size = din.i_size;
-    for (uint32_t b = 0; b < 12 && !result; b++) {
+    for (uint32_t b = 0; b < 12 && !found; b++) {
         if (din.i_block[b] == 0) continue;
         if (!ext2_data_blk_ok(m, din.i_block[b])) break;
         if (ext2_read_block(m, din.i_block[b], buf) < 0) break;
@@ -793,13 +852,15 @@ static struct dirent *ext2_readdir(struct fs_node *node, uint32_t index)
             if (!ext2_dirent_ok(de, off, limit)) break;
             if (de->inode != 0) {
                 if (cur == index) {
+                    // Straight into the caller's buffer: filesystem-side
+                    // storage would be racy the moment the lock drops.
                     uint32_t nl = de->name_len;
-                    if (nl > sizeof(s_dirent.name) - 1)
-                        nl = sizeof(s_dirent.name) - 1;
-                    memcpy(s_dirent.name, de + 1, nl);
-                    s_dirent.name[nl] = '\0';
-                    s_dirent.inode = de->inode;
-                    result = &s_dirent;
+                    if (nl > sizeof(out->name) - 1)
+                        nl = sizeof(out->name) - 1;
+                    memcpy(out->name, de + 1, nl);
+                    out->name[nl] = '\0';
+                    out->inode = de->inode;
+                    found = 1;
                     break;
                 }
                 cur++;
@@ -809,7 +870,7 @@ static struct dirent *ext2_readdir(struct fs_node *node, uint32_t index)
     }
     kfree(buf);
     mutex_unlock(&m->lock);
-    return result;
+    return found ? 0 : -1;
 }
 
 static struct fs_node *ext2_finddir(struct fs_node *node, char *name)
