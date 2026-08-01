@@ -237,7 +237,7 @@ def main():
 
         # argv + open/read loop + sbrk: cat streams a >4KB file; check content
         # from both the first and a later read() chunk.
-        sh.run("cat symtable", ["kernel_base", "kernel_end"], "cat symtable")
+        sh.run("cat symtable", ["kernel_base", "stack_top"], "cat symtable")
 
         # Pipes: hello's stdout is a pipe feeding upper, so only the
         # uppercased text reaches the terminal; the prompt returning proves
@@ -246,7 +246,7 @@ def main():
 
         # Three stages, and < redirection reading an initrd file to EOF.
         sh.run("cat symtable | upper | upper", ["KERNEL_BASE"], "3-stage pipeline")
-        sh.run("upper < symtable", ["KERNEL_END"], "input redirection")
+        sh.run("upper < symtable", ["STACK_TOP"], "input redirection")
 
         # A stage dying mid-pipeline: crash is killed by its page fault, the
         # kill path closes its pipe write end, and upper sees EOF instead of
