@@ -80,6 +80,10 @@ qemu-system-i386 -kernel kernel.elf -initrd initrd/initrd.tar \
   is reported, check whether the shell still answers on serial before assuming a lock.
 - `wait` returns the child's exit status from a 32-entry ring buffer; statuses of
   long-dead pids read as 0.
+- Pipe ends are the only refcounted fd type: duplicate via `file_addref`, drop via
+  `file_close`. `exit()`/`task_kill()` close the dying task's whole fd table -- that,
+  not the reaper, is what unblocks a peer waiting on the far end (EOF for readers,
+  -1 for writers). Never copy a `struct file` without taking the ref.
 
 ## Conventions
 

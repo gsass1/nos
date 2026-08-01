@@ -6,6 +6,7 @@
 #include <kernel.h>
 #include <keyboard.h>
 #include <mouse.h>
+#include <pipe.h>
 #include <pit.h>
 #include <serial.h>
 #include <string.h>
@@ -54,6 +55,10 @@ static int sys_write(int fd, const char *buf, uint32_t len)
     case FD_CONSOLE:
         console_write(buf, len);
         return (int)len;
+    case FD_PIPE_W:
+        // Pipe data is program-to-program plumbing, not terminal output; it
+        // reaches the serial log only if the far end eventually prints it.
+        return pipe_write(f->pipe, buf, len);
     case FD_CHANNEL:
         // Output for a terminal window: into the channel's ring. Serial
         // still sees everything, which keeps logs and tests whole.
@@ -168,6 +173,8 @@ static int sys_read(int fd, char *buf, uint32_t len)
         f->offset += got;
         return (int)got;
     }
+    case FD_PIPE_R:
+        return pipe_read(f->pipe, buf, len);
     default:
         return -1;
     }
@@ -179,9 +186,63 @@ static int sys_close(int fd)
     if (!f || f->type == FD_NONE) {
         return -1;
     }
-    f->type = FD_NONE;
-    f->node = 0;
+    file_close(f);
     return 0;
+}
+
+// Create a pipe and install its two ends as fresh fds: fds[0] reads what
+// fds[1] writes. The ends flow into children via exec2/inheritance.
+static int sys_pipe(int *fds)
+{
+    if (!fds) {
+        return -1;
+    }
+    struct task *t = task_current();
+    int rfd = -1, wfd = -1;
+    for (int i = 3; i < TASK_MAX_FILES && wfd < 0; i++) { // 0-2 are stdio
+        if (t->files[i].type == FD_NONE) {
+            if (rfd < 0) {
+                rfd = i;
+            } else {
+                wfd = i;
+            }
+        }
+    }
+    if (wfd < 0) {
+        return -1; // fewer than two free slots
+    }
+    struct pipe *p = pipe_create();
+    t->files[rfd].type = FD_PIPE_R;
+    t->files[rfd].pipe = p;
+    t->files[wfd].type = FD_PIPE_W;
+    t->files[wfd].pipe = p;
+    fds[0] = rfd;
+    fds[1] = wfd;
+    return 0;
+}
+
+// exec with an fd map: the child's fd i becomes a copy of the caller's fd
+// fds[i] (-1 inherits the caller's own fd i, like plain exec). This is the
+// spawn-model replacement for fork+dup2 -- the parent wires a pipeline's
+// stdio without the child's cooperation. References are taken by spawn_task,
+// so a failed exec leaves nothing to undo.
+static int sys_exec2(const char *path, const char *const *argv, const int *fds)
+{
+    struct task *t = task_current();
+    struct file stdio[3];
+    for (int i = 0; i < 3; i++) {
+        int fd = fds ? fds[i] : -1;
+        if (fd < 0) {
+            stdio[i] = t->files[i];
+            continue;
+        }
+        struct file *f = fd_get(fd);
+        if (!f || f->type == FD_NONE) {
+            return -1;
+        }
+        stdio[i] = *f;
+    }
+    return elf_exec(path, argv, stdio);
 }
 
 // Grow (never shrink) the user heap. Returns the previous break, so
@@ -417,6 +478,14 @@ void syscall_dispatch(struct regs *r)
         break;
     case SYS_KILL:
         r->eax = (uint32_t)task_kill((int)r->ebx);
+        break;
+    case SYS_PIPE:
+        r->eax = (uint32_t)sys_pipe((int *)r->ebx);
+        break;
+    case SYS_EXEC2:
+        r->eax = (uint32_t)sys_exec2((const char *)r->ebx,
+                                     (const char *const *)r->ecx,
+                                     (const int *)r->edx);
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);
