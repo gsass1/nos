@@ -275,17 +275,16 @@ NOS side was checked against `include/syscall.h`, `kernel/syscall.c`,
     `<` to be a separate word; xv6 recognizes tabs and other whitespace and
     tokenizes operators without surrounding spaces.
 
-56. **`cat` lacks xv6's stdin/filter mode.** With no filename NOS prints usage;
-    xv6 reads descriptor 0, which makes `producer | cat` and interactive input
-    work.
+56. **Complete: `cat` supports xv6's stdin/filter mode.** With no filename it
+    reads descriptor 0, so `producer | cat` and interactive input work.
 
 57. **The standalone `ls` behavior is absent.** NOS has a root-only shell
     builtin that prints names; xv6 `ls` accepts paths and reports type, inode,
     and size for files and directory entries.
 
-58. **The standard xv6 utilities are missing.** NOS does not ship `echo`, `grep`
-    (including xv6's `^`, `.`, `*`, and `$` matcher), `kill`, `ln`, `mkdir`,
-    `rm`, or `wc`.
+58. **Some standard xv6 utilities are missing.** NOS now ships `echo`, `grep`
+    (including xv6's `^`, `.`, `*`, and `$` matcher), and `wc`; it still lacks
+    `kill`, `ln`, `mkdir`, and `rm`.
 
 59. **The xv6 process/filesystem exercisers are missing.** NOS does not ship
     `forktest`, `stressfs`, `usertests`, or `zombie`. NOS has its own integration

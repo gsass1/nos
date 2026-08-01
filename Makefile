@@ -20,7 +20,7 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr
 OBJ=boot/boot.o \
 drivers/keyboard.o \
 drivers/mouse.o \
@@ -162,6 +162,18 @@ initrd/cat: user/cat.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/cat.c -o user/cat.o $(CFLAGS)
 	$(LD) -T user/user.ld user/cat.o -o initrd/cat
 
+initrd/echo: user/echo.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/echo.c -o user/echo.o $(CFLAGS)
+	$(LD) -T user/user.ld user/echo.o -o initrd/echo
+
+initrd/grep: user/grep.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/grep.c -o user/grep.o $(CFLAGS)
+	$(LD) -T user/user.ld user/grep.o -o initrd/grep
+
+initrd/wc: user/wc.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/wc.c -o user/wc.o $(CFLAGS)
+	$(LD) -T user/user.ld user/wc.o -o initrd/wc
+
 initrd/fbtest: user/fbtest.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/fbtest.c -o user/fbtest.o $(CFLAGS)
 	$(LD) -T user/user.ld user/fbtest.o -o initrd/fbtest
@@ -190,7 +202,7 @@ initrd/badptr: user/badptr.c user/ulib.h user/user.ld include/syscall.h
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat fbtest mtest wm spin upper badptr
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr
 
 initrd: $(INITRD)
 
