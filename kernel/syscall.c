@@ -8,6 +8,7 @@
 #include <mouse.h>
 #include <pipe.h>
 #include <pit.h>
+#include <rtc.h>
 #include <serial.h>
 #include <net.h>
 #include <string.h>
@@ -554,6 +555,9 @@ void syscall_dispatch(struct regs *r)
         break;
     case SYS_CONNECT:
         r->eax = (uint32_t)sys_connect(r->ebx, (uint16_t)r->ecx);
+        break;
+    case SYS_TIME:
+        r->eax = rtc_unix_time();
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

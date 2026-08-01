@@ -26,6 +26,7 @@ OBJ=boot/boot.o \
 	drivers/mouse.o \
 	drivers/serial.o \
 	drivers/ata.o \
+	drivers/rtc.o \
 	drivers/rtl8139.o \
 	kernel/block.o \
 	kernel/console.o \
@@ -55,7 +56,32 @@ kernel/vfs.o \
 kernel/vga.o \
 kernel/vsprintf.o
 
+# Vendored BearSSL (third_party/bearssl), built for userland against the
+# freestanding shim libc in user/libc. The x86 SIMD implementations are
+# excluded -- their intrinsics headers require a hosted libc -- and disabled
+# through the BR_* macros so BearSSL's portable constant-time code is used.
+# -O2 matters: TLS handshakes do real bignum math on an emulated i386.
+BEARSSL_DIR=third_party/bearssl
+BEARSSL_SRC=$(filter-out %/ghash_pclmul.c %/chacha20_sse2.c %/sysrng.c \
+    $(wildcard $(BEARSSL_DIR)/src/symcipher/aes_x86ni*.c), \
+    $(wildcard $(BEARSSL_DIR)/src/*.c $(BEARSSL_DIR)/src/*/*.c))
+BEARSSL_OBJ=$(BEARSSL_SRC:.c=.o)
+BEARSSL_CFLAGS=-I$(BEARSSL_DIR)/inc -I$(BEARSSL_DIR)/src -Iuser/libc \
+    -std=gnu99 -ffreestanding -O2 -g \
+    -DBR_AES_X86NI=0 -DBR_SSE2=0 -DBR_RDRAND=0
+BEARSSL_LIB=$(BEARSSL_DIR)/libbearssl.a
+AR=$(TOOLPREFIX)ar
+
 all: $(BIN)
+
+$(BEARSSL_DIR)/src/%.o: $(BEARSSL_DIR)/src/%.c
+	$(CC) -c $< -o $@ $(BEARSSL_CFLAGS)
+
+$(BEARSSL_LIB): $(BEARSSL_OBJ)
+	$(AR) rcs $@ $(BEARSSL_OBJ)
+
+user/libc/libc.o: user/libc/libc.c user/libc/string.h
+	$(CC) -c user/libc/libc.c -o user/libc/libc.o $(CFLAGS)
 
 boot/boot.o: boot/boot.S
 	$(AS) boot/boot.S -o boot/boot.o $(AFLAGS)
@@ -71,6 +97,9 @@ drivers/serial.o: drivers/serial.c
 
 drivers/ata.o: drivers/ata.c
 	$(CC) -c drivers/ata.c -o drivers/ata.o $(CFLAGS)
+
+drivers/rtc.o: drivers/rtc.c
+	$(CC) -c drivers/rtc.c -o drivers/rtc.o $(CFLAGS)
 
 drivers/rtl8139.o: drivers/rtl8139.c
 	$(CC) -c drivers/rtl8139.c -o drivers/rtl8139.o $(CFLAGS)
@@ -224,9 +253,11 @@ initrd/badptr: user/badptr.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/badptr.c -o user/badptr.o $(CFLAGS)
 	$(LD) -T user/user.ld user/badptr.o -o initrd/badptr
 
-initrd/wget: user/wget.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/wget.c -o user/wget.o $(CFLAGS)
-	$(LD) -T user/user.ld user/wget.o -o initrd/wget
+# wget links BearSSL for https; the shim libc satisfies BearSSL's five libc
+# imports (and gcc's own memcpy/memset emissions).
+initrd/wget: user/wget.c user/trust_anchors.h user/ulib.h user/user.ld include/syscall.h user/libc/libc.o $(BEARSSL_LIB)
+	$(CC) -c user/wget.c -o user/wget.o $(CFLAGS) -I$(BEARSSL_DIR)/inc
+	$(LD) -T user/user.ld user/wget.o user/libc/libc.o -o initrd/wget $(BEARSSL_LIB)
 
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
@@ -264,5 +295,6 @@ clean:
 	rm -f $(OBJ)
 	rm -f $(BIN)
 	rm -f $(ISO)
-	rm -f user/*.o
+	rm -f user/*.o user/libc/libc.o
+	rm -f $(BEARSSL_OBJ) $(BEARSSL_LIB)
 	rm -rf initrd

@@ -34,6 +34,7 @@
 #define SYS_EXEC2   26  // exec2(path, argv, int fds[3]) -> pid; child fd i = caller's fd fds[i], -1 = inherit
 #define SYS_RESOLVE 27  // resolve(name, uint32_t *ip) -> 0, or -1; DNS A lookup, ip in wire order
 #define SYS_CONNECT 28  // connect(uint32_t ip, port)  -> socket fd, or -1; read/write/close as usual
+#define SYS_TIME    29  // time(void)                  -> unix seconds (UTC), or 0 if the RTC was unreadable
 
 // Returned by SYS_MOUSE: cursor position in framebuffer coordinates,
 // buttons bit0=left bit1=right bit2=middle.

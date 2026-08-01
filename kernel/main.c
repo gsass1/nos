@@ -11,6 +11,7 @@
 #include <net.h>
 #include <pic.h>
 #include <pit.h>
+#include <rtc.h>
 #include <serial.h>
 #include <string.h>
 #include <sym.h>
@@ -102,6 +103,9 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
     ata_init();
     ata_test((mbootptr->flags & (1U << 2))
              ? (const char *)mbootptr->cmdline : 0);
+
+	// Wall-clock time from the CMOS RTC (SYS_TIME; certificate validation).
+    rtc_init();
 
 	// PS/2 keyboard and mouse initalization
     kbd_init();

@@ -1,6 +1,7 @@
 *.iso
 *.elf
 *.o
+*.a
 *.swp
 iso/symtable
 

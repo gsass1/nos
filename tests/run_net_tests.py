@@ -12,6 +12,7 @@ Usage: python3 tests/run_net_tests.py   (from the repo root, after make && make 
 
 import os
 import subprocess
+import tempfile
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,7 +22,8 @@ INITRD = os.path.join(REPO, "initrd", "initrd.tar")
 
 WAIT_TIMEOUT = 30  # seconds per marker; CI runners can be slow
 
-KEYMAP = {" ": "spc", ".": "dot", "/": "slash", "-": "minus", "|": "shift-backslash"}
+KEYMAP = {" ": "spc", ".": "dot", "/": "slash", "-": "minus",
+          ":": "shift-semicolon", "|": "shift-backslash"}
 for _c in "abcdefghijklmnopqrstuvwxyz0123456789":
     KEYMAP[_c] = _c
 for _c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
@@ -95,12 +97,53 @@ class Shell:
             self.proc.kill()
 
 
+# TLS servers on host loopback; the guest reaches them as 10.0.2.2:<port>
+# through slirp. Port 4443 serves the certificate signed by the embedded NOS
+# Test CA; port 4444 serves a freshly generated self-signed certificate that
+# chains to nothing, for the verification-failure and -k paths.
+TLS_TRUSTED_PORT = 4443
+TLS_UNTRUSTED_PORT = 4444
+
+
+def start_tls_stub(port, cert, key, marker):
+    proc = subprocess.Popen(
+        ["python3", os.path.join(REPO, "tests", "https_stub.py"),
+         str(port), cert, key, marker],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    if proc.stdout.readline().strip() != "ready":
+        raise RuntimeError(f"TLS stub on port {port} failed to start")
+    return proc
+
+
 def main():
     if not (os.path.exists(KERNEL) and os.path.exists(INITRD)):
         print("Build first: make && make initrd")
         return 2
     if os.path.exists(SERIAL_LOG):
         os.remove(SERIAL_LOG)
+
+    stubs = []
+    tmpdir = tempfile.mkdtemp(prefix="nos-tls-")
+    ca_dir = os.path.join(REPO, "tests", "ca")
+    stubs.append(start_tls_stub(
+        TLS_TRUSTED_PORT,
+        os.path.join(ca_dir, "test_server.pem"),
+        os.path.join(ca_dir, "test_server.key"),
+        "NOS-TLS-TEST-OK"))
+    # Self-signed, untrusted, generated fresh (also SAN 10.0.2.2, so only the
+    # trust check -- not the name check -- distinguishes it).
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+         "-keyout", os.path.join(tmpdir, "bad.key"),
+         "-out", os.path.join(tmpdir, "bad.pem"),
+         "-days", "30", "-nodes", "-subj", "/CN=10.0.2.2",
+         "-addext", "subjectAltName=DNS:10.0.2.2"],
+        check=True, capture_output=True)
+    stubs.append(start_tls_stub(
+        TLS_UNTRUSTED_PORT,
+        os.path.join(tmpdir, "bad.pem"),
+        os.path.join(tmpdir, "bad.key"),
+        "NOS-TLS-INSECURE-OK"))
 
     sh = Shell()
     try:
@@ -137,10 +180,35 @@ def main():
             "second connection",
         )
 
+        # HTTPS against the trusted stub: full TLS 1.2 handshake in BearSSL,
+        # certificate chain verified against the embedded NOS Test CA using
+        # RTC wall-clock time, response decrypted.
+        sh.run(
+            "wget https://10.0.2.2:4443/",
+            ["HTTP/1.0 200 OK", "NOS-TLS-TEST-OK"],
+            "https against trusted stub",
+        )
+
+        # A self-signed certificate must be rejected by verification...
+        sh.run(
+            "wget https://10.0.2.2:4444/",
+            ["certificate not trusted", "[exit status 1]"],
+            "https untrusted rejection",
+        )
+
+        # ...and accepted (still encrypted) when the user opts out with -k.
+        sh.run(
+            "wget -k https://10.0.2.2:4444/",
+            ["HTTP/1.0 200 OK", "NOS-TLS-INSECURE-OK"],
+            "https -k insecure mode",
+        )
+
         if "panic:" in sh.serial():
             failures.append("kernel panicked (see serial log)")
     finally:
         sh.kill()
+        for stub in stubs:
+            stub.kill()
 
     if failures:
         print("FAIL")
@@ -148,7 +216,8 @@ def main():
             print("  - " + f)
         return 1
     print("PASS (rtl8139 probe, ARP, TCP handshake, HTTP GET, multi-segment "
-          "receive, socket-in-pipeline, reconnect)")
+          "receive, socket-in-pipeline, reconnect, TLS handshake, x509 "
+          "verification, untrusted rejection, -k insecure mode)")
     return 0
 
 

@@ -440,6 +440,7 @@ in memory. The initrd currently holds `symtable`, `hello`, and `sh`.
 | PIT     | `kernel/pit.c`      | 200 Hz timer; IRQ0 drives the scheduler |
 | ATA     | `drivers/ata.c`     | Legacy primary/secondary PIO; IDENTIFY plus bounded polling LBA28 reads, writes, and cache flush |
 | Ethernet| `drivers/rtl8139.c` | RTL8139 over PCI; RX ring drained in IRQ context into `net_rx`, 4 bounce-buffered TX slots |
+| RTC     | `drivers/rtc.c`     | CMOS clock read once at boot; `SYS_TIME` extrapolates via the PIT tick counter |
 
 `kprintf` writes to both VGA and serial (guarded by a mutex); `mprintf` prefixes
 a module tag; `panic` prints a message and a symbolic stack trace, then halts.
@@ -461,6 +462,16 @@ task-context loop polling `timer_ticks` (the `sys_sleep` pattern) -- there are
 no timer callbacks. Sockets surface as refcounted `FD_SOCKET` fds created by
 `SYS_CONNECT` (plus `SYS_RESOLVE` for DNS) and are then plain `read`/`write`/
 `close` streams; `user/wget.c` does an HTTP/1.0 GET over one.
+
+**HTTPS** is implemented entirely in userland: `wget` links a vendored,
+cross-compiled BearSSL (`third_party/bearssl/`, portable constant-time code
+only) against the 5-function shim libc in `user/libc/`, layering TLS 1.2 over
+the plain socket fd. Certificates are verified with `br_x509_minimal` against
+the trust anchors embedded in `user/trust_anchors.h` (GTS Root R1, ISRG Root
+X1, and the checked-in test CA), with validity time from `SYS_TIME`; `wget -k`
+downgrades to encrypted-but-unauthenticated for other chains. Entropy for the
+handshake is rdtsc/wall-clock mixing -- adequate for a hobby OS, not
+cryptographically strong.
 
 ---
 
@@ -492,7 +503,9 @@ no timer callbacks. Sockets surface as refcounted `FD_SOCKET` fds created by
 | `kernel/block.c`, `drivers/ata.c` | Block-device registry and polling ATA PIO |
 | `kernel/pci.c` | PCI config-space access (mechanism #1) |
 | `drivers/rtl8139.c` | RTL8139 ethernet driver |
+| `drivers/rtc.c` | CMOS wall clock (SYS_TIME) |
 | `kernel/net.c`, `kernel/tcp.c` | Ethernet/ARP/IPv4/UDP/DNS and client TCP |
+| `third_party/bearssl/`, `user/libc/`, `user/trust_anchors.h` | Vendored TLS library, shim libc, embedded roots (HTTPS in `user/wget.c`) |
 | `kernel/interrupt.S` | ISR stubs, `SAVE/RESTORE_REGS`, `task_switch`, `_asm_syscall` |
 | `kernel/isr.c` | C exception/IRQ handlers |
 | `kernel/paging.c` | Frame allocator, page tables, `clone/free_directory` |

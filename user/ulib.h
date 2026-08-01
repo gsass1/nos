@@ -71,6 +71,9 @@ static inline int pollc(void)                 { return sys0(SYS_POLLC); }
 static inline int getfont(void *buf8192)      { return sys1(SYS_FONT, (int)buf8192); }
 static inline int uptime_ms(void)             { return sys0(SYS_UPTIME); }
 
+// Unix seconds (UTC) from the CMOS clock, or 0 if it was unreadable at boot.
+static inline unsigned time_unix(void)        { return (unsigned)sys0(SYS_TIME); }
+
 // Console channels: run a program in a captured terminal (see SYS_EXECC).
 static inline int execc(const char *path, char *const argv[])
 {
