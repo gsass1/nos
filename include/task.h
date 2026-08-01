@@ -4,6 +4,19 @@
 #include <mm.h>
 #include <stdint.h>
 
+struct fs_node;
+
+// One open file. node == 0 means the slot is free. Files come from the
+// (read-only) initrd, so there is nothing to release on close/reap beyond
+// clearing the slot.
+struct file
+{
+    struct fs_node *node;
+    uint32_t offset;
+};
+
+#define TASK_MAX_FILES 8
+
 struct task
 {
     int id;
@@ -22,6 +35,10 @@ struct task
     uint32_t kstack_top;
     struct page_directory *page_directory;
     int owns_dir; // if set, page_directory is freed when the task is reaped
+    // Program break for SYS_SBRK: the user heap occupies [USER_HEAP_BASE, brk).
+    // 0 for kernel threads (no user heap).
+    uint32_t brk;
+    struct file files[TASK_MAX_FILES]; // fds 3.. index this as fd-3
     struct task *next;      // ready-queue link
     struct task *reap_next; // zombie-list link (used only after exit())
 };
@@ -43,8 +60,16 @@ int task_alive(int pid);
 // entry point (see _asm_irq_0 / schedule()).
 void task_switch(void);
 
-// Terminate the current task and switch away permanently. Never returns.
-void exit(void);
+// Terminate the current task with the given exit status and switch away
+// permanently. Never returns. The status is retrievable (for a while) via
+// task_exit_code() after the task has died.
+void exit(int code);
+
+// Exit status of a recently-died task, or 0 if unknown/forgotten.
+int task_exit_code(int pid);
+
+// The task currently running on the CPU (0 before tasking_init).
+struct task *task_current(void);
 
 // Free the resources of tasks that have exit()ed. Safe to call from the idle
 // loop; it runs in its own address space, so it can free a dead task's stack

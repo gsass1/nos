@@ -1,47 +1,8 @@
-// nsh -- the NOS shell, as a standalone freestanding binary. It is loaded from
-// the initrd by elf_exec() and reaches the kernel only through int 0x80, so it
-// is a genuine program rather than kernel code (and becomes a ring-3 process
-// unchanged once user mode lands).
-#include <syscall.h>
+// nsh -- the NOS shell, as a standalone ring-3 binary. It is loaded from the
+// initrd by elf_exec() and reaches the kernel only through int 0x80.
+#include "ulib.h"
 
-static inline int sys0(int n)
-{
-    int r;
-    asm volatile("int $0x80" : "=a"(r) : "a"(n) : "memory");
-    return r;
-}
-
-static inline int sys3(int n, int a, int b, int c)
-{
-    int r;
-    asm volatile("int $0x80" : "=a"(r) : "a"(n), "b"(a), "c"(b), "d"(c) : "memory");
-    return r;
-}
-
-static int slen(const char *s)
-{
-    int n = 0;
-    while (s[n]) {
-        n++;
-    }
-    return n;
-}
-
-static void put(const char *s)     { sys3(SYS_WRITE, 1, (int)s, slen(s)); }
-static void putc(char c)           { sys3(SYS_WRITE, 1, (int)&c, 1); }
-static int  getc(void)             { return sys0(SYS_GETC); }
-
-static int streq(const char *a, const char *b)
-{
-    int i = 0;
-    while (a[i] && b[i]) {
-        if (a[i] != b[i]) {
-            return 0;
-        }
-        i++;
-    }
-    return a[i] == b[i];
-}
+#define MAX_ARGS 8
 
 static void cmd_ls(void)
 {
@@ -54,29 +15,54 @@ static void cmd_ls(void)
     }
 }
 
-static void run(const char *cmd)
+static void run(char *line)
 {
-    if (cmd[0] == '\0') {
+    // Split the line into words in place; argv is NULL-terminated for exec.
+    char *argv[MAX_ARGS + 1];
+    int argc = 0;
+    char *p = line;
+    while (*p && argc < MAX_ARGS) {
+        while (*p == ' ') {
+            *p++ = '\0';
+        }
+        if (!*p) {
+            break;
+        }
+        argv[argc++] = p;
+        while (*p && *p != ' ') {
+            p++;
+        }
+    }
+    argv[argc] = 0;
+    if (argc == 0) {
         return;
-    } else if (streq(cmd, "help")) {
+    }
+
+    if (streq(argv[0], "help")) {
         put("builtins: help  ls  clear  exit\n");
-    } else if (streq(cmd, "ls")) {
+        put("anything else runs a program from the initrd (try: cat symtable)\n");
+    } else if (streq(argv[0], "ls")) {
         cmd_ls();
-    } else if (streq(cmd, "clear")) {
+    } else if (streq(argv[0], "clear")) {
         sys0(SYS_CLEAR);
-    } else if (streq(cmd, "exit")) {
+    } else if (streq(argv[0], "exit")) {
         put("bye!\n");
-        sys3(SYS_EXIT, 0, 0, 0);
+        exit(0);
     } else {
-        // Not a builtin: try to run it as a program from the initrd, then wait
-        // for it to finish before showing the prompt again.
-        int pid = sys3(SYS_EXEC, (int)cmd, 0, 0);
+        // Not a builtin: run it as a program from the initrd (passing the
+        // remaining words as its argv) and wait for it to finish.
+        int pid = exec(argv[0], argv);
         if (pid < 0) {
             put("unknown command: ");
-            put(cmd);
+            put(argv[0]);
             put("\n");
         } else {
-            sys3(SYS_WAIT, pid, 0, 0);
+            int status = wait(pid);
+            if (status != 0) {
+                put("[exit status ");
+                puti(status);
+                put("]\n");
+            }
         }
     }
 }
@@ -85,7 +71,7 @@ void _start(void)
 {
     char buf[128];
 
-    put("nsh - NOS userspace shell (its own binary). Type 'help'.\n");
+    put("nsh - NOS userspace shell (ring 3). Type 'help'.\n");
 
     for (;;) {
         put("\nnsh$ ");
@@ -94,7 +80,7 @@ void _start(void)
         for (;;) {
             int c = getc();
             if (c == '\n') {
-                putc('\n');
+                putch('\n');
                 break;
             }
             if (c == '\b') {
@@ -106,7 +92,7 @@ void _start(void)
             }
             if (i < (int)sizeof(buf) - 1) {
                 buf[i++] = (char)c;
-                putc((char)c); // local echo
+                putch((char)c); // local echo
             }
         }
         buf[i] = '\0';

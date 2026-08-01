@@ -21,7 +21,7 @@ static void fault_kill_user(struct fault_frame *f, const char *what)
 {
     kprintf("%s (pid %d) killed: %s at eip 0x%08x\n",
             getpname(), getpid(), what, f->eip);
-    exit();
+    exit(-1);
 }
 
 void isr_exc_DIV0(struct fault_frame *f)
@@ -125,7 +125,7 @@ void isr_exc_PF(struct fault_frame *f)
     if (f->cs & 3) {
         kprintf("%s (pid %d) killed: page fault at eip 0x%08x (addr 0x%08x, error 0x%08x)\n",
                 getpname(), getpid(), f->eip, cr2, f->err);
-        exit();
+        exit(-1);
     }
     panic("Page fault (pid:%d, eip:0x%08x, cr2:0x%08x, error:0x%08x)\n",
           getpid(), f->eip, cr2, f->err);

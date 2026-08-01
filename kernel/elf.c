@@ -15,13 +15,39 @@ static int elf_is_valid(struct elf32_ehdr *eh)
            eh->e_ident[2] == 'L'  && eh->e_ident[3] == 'F';
 }
 
-int elf_exec(const char *path)
+// True if p can be a pointer into the calling process's user memory. Kernel
+// callers (kmain) pass argv = NULL, so argv entries must always be user
+// pointers; rejecting everything else keeps a bogus argv array from making
+// the kernel dereference wild addresses on the caller's behalf.
+static int is_user_ptr(const void *p)
+{
+    return (uint32_t)p >= USER_VADDR_MIN && (uint32_t)p < USER_VADDR_MAX;
+}
+
+int elf_exec(const char *path, const char *const *argv)
 {
     // Copy the path out of the caller's address space now: once we activate the
     // new page directory below, the caller's user memory is no longer mapped.
     char kpath[128];
     strncpy(kpath, path, sizeof(kpath) - 1);
     kpath[sizeof(kpath) - 1] = '\0';
+
+    // Same for the argument strings. kargv[] points into argbuf.
+    char argbuf[EXEC_ARG_BYTES];
+    const char *kargv[EXEC_MAX_ARGS];
+    uint32_t argc = 0, argused = 0;
+    if (argv && is_user_ptr(argv)) {
+        while (argc < EXEC_MAX_ARGS && is_user_ptr(argv[argc])) {
+            uint32_t len = strlen(argv[argc]) + 1;
+            if (argused + len > sizeof(argbuf)) {
+                break;
+            }
+            memcpy(argbuf + argused, argv[argc], len);
+            kargv[argc] = argbuf + argused;
+            argused += len;
+            argc++;
+        }
+    }
 
     struct fs_node *node = vfs_finddir(fs_root, kpath);
     if (!node) {
@@ -122,6 +148,28 @@ int elf_exec(const char *path)
     // stack rather than another task's leftovers.
     memset((void *)(USER_STACK_TOP - USER_STACK_SIZE), 0, USER_STACK_SIZE);
 
+    // Lay out the initial stack so _start(int argc, char **argv) works as a
+    // plain cdecl function: the argument strings at the very top, then the
+    // argv pointer array, then [fake return address][argc][argv].
+    uint32_t usp = USER_STACK_TOP;
+    uint32_t uargs[EXEC_MAX_ARGS];
+    for (uint32_t i = 0; i < argc; i++) {
+        uint32_t len = strlen(kargv[i]) + 1;
+        usp -= len;
+        memcpy((void *)usp, kargv[i], len);
+        uargs[i] = usp;
+    }
+    usp &= ~3U; // word-align below the strings
+    usp -= (argc + 1) * 4;
+    uint32_t uargv = usp;
+    for (uint32_t i = 0; i < argc; i++) {
+        ((uint32_t *)uargv)[i] = uargs[i];
+    }
+    ((uint32_t *)uargv)[argc] = 0;
+    usp -= 4; *(uint32_t *)usp = uargv;      // argv
+    usp -= 4; *(uint32_t *)usp = argc;       // argc
+    usp -= 4; *(uint32_t *)usp = 0;          // fake return address for _start
+
     asm volatile("mov %0, %%cr3" :: "r"(old_cr3));
     asm volatile("sti");
 
@@ -129,5 +177,5 @@ int elf_exec(const char *path)
     kfree(buf);
 
     mprintf(LOGLEVEL_DEFAULT, "elf_exec: '%s' loaded, entry 0x%08x\n", kpath, entry);
-    return spawn_task(kpath, (void *)entry, dir, USER_STACK_TOP);
+    return spawn_task(kpath, (void *)entry, dir, usp);
 }

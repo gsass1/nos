@@ -11,7 +11,7 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat
 OBJ=boot/boot.o \
 drivers/keyboard.o \
 drivers/serial.o \
@@ -117,23 +117,27 @@ iso: $(BIN) $(INITRD)
 
 # Build a freestanding user program: compile, then link at the user base
 # address (see user/user.ld) into a flat ELF the kernel's elf_exec() loads.
-initrd/hello: user/hello.c user/user.ld include/syscall.h
+initrd/hello: user/hello.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/hello.c -o user/hello.o $(CFLAGS)
 	$(LD) -T user/user.ld user/hello.o -o initrd/hello
 
-initrd/sh: user/sh.c user/user.ld include/syscall.h
+initrd/sh: user/sh.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/sh.c -o user/sh.o $(CFLAGS)
 	$(LD) -T user/user.ld user/sh.o -o initrd/sh
 
-initrd/crash: user/crash.c user/user.ld include/syscall.h
+initrd/crash: user/crash.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/crash.c -o user/crash.o $(CFLAGS)
 	$(LD) -T user/user.ld user/crash.o -o initrd/crash
+
+initrd/cat: user/cat.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/cat.c -o user/cat.o $(CFLAGS)
+	$(LD) -T user/user.ld user/cat.o -o initrd/cat
 
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat
 
 initrd: $(INITRD)
 

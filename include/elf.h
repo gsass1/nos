@@ -45,8 +45,21 @@ struct elf32_phdr
 #define USER_STACK_TOP  0x50000000U
 #define USER_STACK_SIZE 0x4000U // 16KB
 
+// The user heap grows from USER_HEAP_BASE via SYS_SBRK, up to at most
+// USER_HEAP_MAX. Pages are mapped on demand in the calling task's directory.
+#define USER_HEAP_BASE 0x60000000U
+#define USER_HEAP_MAX  0x70000000U
+
+// exec() argument limits: how many argv entries and how many total string
+// bytes elf_exec will copy onto the new process's stack.
+#define EXEC_MAX_ARGS    16
+#define EXEC_ARG_BYTES   1024
+
 // Load an ELF32 program from the initrd, mapping its PT_LOAD segments, and
-// start it as a task. Returns the new task id, or -1 on failure.
-int elf_exec(const char *path);
+// start it as a ring-3 task. `argv` is a NULL-terminated array of argument
+// strings in the CALLER's address space (or NULL for none); they are copied
+// onto the new process's stack so its _start receives (int argc, char **argv).
+// Returns the new task id, or -1 on failure.
+int elf_exec(const char *path, const char *const *argv);
 
 #endif

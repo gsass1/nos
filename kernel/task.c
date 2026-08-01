@@ -1,3 +1,4 @@
+#include <elf.h>
 #include <gdt.h>
 #include <mm.h>
 #include <string.h>
@@ -19,6 +20,13 @@ volatile struct task *ready_queue;
 static volatile struct task *zombie_queue;
 
 static uint32_t next_pid = 0;
+
+// Ring buffer of recent exit statuses. The reaper frees a dead task's struct
+// before the parent necessarily calls wait, so the status must outlive it.
+// Old entries are overwritten; wait on a long-dead pid just reports 0.
+#define EXIT_RECORDS 32
+static struct { int pid; int code; } exit_records[EXIT_RECORDS];
+static int exit_record_next;
 
 // Selects the next task to run. Called from assembly (both the timer IRQ and
 // the cooperative task_switch yield) with `esp` pointing at the outgoing task's
@@ -67,6 +75,8 @@ void tasking_init(void)
     current_task->esp = 0;
     current_task->stack_mem = 0;
     current_task->kstack_top = 0; // pure ring0 task, esp0 never used
+    current_task->brk = 0;
+    memset((void *)current_task->files, 0, sizeof(current_task->files));
     current_task->page_directory = current_directory;
     current_task->owns_dir = 0; // shares the boot address space; never reaped
     current_task->next = 0;
@@ -99,6 +109,8 @@ int spawn_task(const char *name, void *entry, struct page_directory *dir,
     uint8_t *stack_mem = kmalloc(stack_size);
     task->stack_mem = stack_mem;
     task->kstack_top = user_esp ? (uint32_t)(stack_mem + stack_size) : 0;
+    task->brk = user_esp ? USER_HEAP_BASE : 0;
+    memset(task->files, 0, sizeof(task->files));
 
     uint32_t *sp = (uint32_t *)(stack_mem + stack_size);
 
@@ -145,13 +157,17 @@ int spawn_task(const char *name, void *entry, struct page_directory *dir,
     return task->id;
 }
 
-void exit(void)
+void exit(int code)
 {
     asm volatile("cli");
 
     if (current_task == ready_queue && current_task->next == 0) {
         panic("Cannot exit the last remaining task!\n");
     }
+
+    exit_records[exit_record_next].pid = current_task->id;
+    exit_records[exit_record_next].code = code;
+    exit_record_next = (exit_record_next + 1) % EXIT_RECORDS;
 
     // Unlink ourselves from the ready queue. We keep current_task->next intact
     // so schedule() can still advance from this (now orphaned) node.
@@ -213,6 +229,21 @@ int task_alive(int pid)
         t = t->next;
     }
     return 0;
+}
+
+int task_exit_code(int pid)
+{
+    for (int i = 0; i < EXIT_RECORDS; i++) {
+        if (exit_records[i].pid == pid) {
+            return exit_records[i].code;
+        }
+    }
+    return 0;
+}
+
+struct task *task_current(void)
+{
+    return (struct task *)current_task;
 }
 
 int getpid(void)
