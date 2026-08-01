@@ -182,9 +182,9 @@
 00104b6f t number
 00104d90 T vsprintf
 00107000 d __module_name
-00107004 d _qwertzuiop
+00107004 d _qwertyuiop
 00107008 d _asdfghjkl
-0010700c d _yxcvbnm
+0010700c d _zxcvbnm
 00107010 d _num
 00107014 d __module_name
 00107018 d __module_name

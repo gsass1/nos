@@ -18,8 +18,8 @@ enum keycode {
     R_RELEASED = 0x93,
     T_PRESSED = 0x14,
     T_RELEASED = 0x94,
-    Z_PRESSED = 0x15,
-    Z_RELEASED = 0x95,
+    Y_PRESSED = 0x15,
+    Y_RELEASED = 0x95,
     U_PRESSED = 0x16,
     U_RELEASED = 0x96,
     I_PRESSED = 0x17,
@@ -46,8 +46,8 @@ enum keycode {
     K_RELEASED = 0xA5,
     L_PRESSED = 0x26,
     L_RELEASED = 0xA6,
-    Y_PRESSED = 0x2C,
-    Y_RELEASED = 0xAC,
+    Z_PRESSED = 0x2C,
+    Z_RELEASED = 0xAC,
     X_PRESSED = 0x2D,
     X_RELEASED = 0xAD,
     C_PRESSED = 0x2E,
@@ -87,9 +87,10 @@ static uint8_t keybuf[KBD_BUF_SIZE];
 static uint32_t kbd_head = 0; // next write slot
 static uint32_t kbd_tail = 0; // next read slot
 
-static char* _qwertzuiop = "qwertzuiop"; // 0x10-0x1c
-static char* _asdfghjkl = "asdfghjkl";
-static char* _yxcvbnm = "yxcvbnm";
+// QWERTY (US) layout tables, indexed by scancode offset within each row.
+static char* _qwertyuiop = "qwertyuiop"; // 0x10-0x19
+static char* _asdfghjkl = "asdfghjkl";   // 0x1E-0x26
+static char* _zxcvbnm = "zxcvbnm";       // 0x2C-0x32
 static char* _num = "123456789";
 
 static uint8_t to_ascii(uint8_t key)
@@ -103,10 +104,10 @@ static uint8_t to_ascii(uint8_t key)
     if(key >= ONE_PRESSED && key <= NINE_PRESSED)
         return _num[key - ONE_PRESSED];
     // 0x10-0x19 is q..p. 0x1A/0x1B ('['/']') are NOT in the string; including
-    // them read past "qwertzuiop" into the neighbouring rodata literal.
+    // them read past "qwertyuiop" into the neighbouring rodata literal.
     if(key >= 0x10 && key <= 0x19)
     {
-        return _qwertzuiop[key - 0x10];
+        return _qwertyuiop[key - 0x10];
     }
     else if(key >= 0x1E && key <= 0x26)
     {
@@ -114,7 +115,7 @@ static uint8_t to_ascii(uint8_t key)
     }
     else if(key >= 0x2C && key <= 0x32)
     {
-        return _yxcvbnm[key - 0x2C];
+        return _zxcvbnm[key - 0x2C];
     }
     return 0;
 }
