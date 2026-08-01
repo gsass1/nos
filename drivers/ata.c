@@ -231,7 +231,7 @@ void ata_init(void)
             dev->block.write = ata_write_blocks;
             dev->block.impl = dev;
             if (ata_identify(dev) == 0 && block_register(&dev->block) == 0) {
-                kprintf("ata: %s: %s, %d sectors\n", dev->block.name,
+                kprintf("ata: %s: %s, %u sectors\n", dev->block.name,
                         dev->model, dev->block.sector_count);
             }
         }
@@ -287,41 +287,44 @@ void ata_test(const char *cmdline)
         return;
     }
 
-    struct block_device *dev = block_get(0);
     uint8_t sector[BLOCK_SECTOR_SIZE];
-    if (!dev || dev->sector_count <= 8) {
-        panic("ATA TEST: no suitable disk\n");
+    if (block_count() != 4) {
+        panic("ATA TEST: expected four disks\n");
     }
-    if (write_mode) {
-        if (block_read(dev, 7, 1, sector) < 0 ||
-            !ata_test_signature(sector, "NOS ATA SEEDED SECTOR")) {
-            panic("ATA TEST: seeded read failed\n");
+    for (uint32_t disk = 0; disk < block_count(); disk++) {
+        struct block_device *dev = block_get(disk);
+        if (!dev || dev->sector_count <= 8) {
+            panic("ATA TEST: unsuitable disk\n");
         }
-        kprintf("ATA TEST: seeded read ok\n");
-
-        for (uint32_t i = 0; i < BLOCK_SECTOR_SIZE; i++) {
-            sector[i] = 0;
+        if (write_mode) {
+            if (block_read(dev, 7, 1, sector) < 0 ||
+                !ata_test_signature(sector, "NOS ATA SEEDED SECTOR")) {
+                panic("ATA TEST: seeded read failed\n");
+            }
+            for (uint32_t i = 0; i < BLOCK_SECTOR_SIZE; i++) {
+                sector[i] = 0;
+            }
+            const char *signature = "NOS ATA PERSISTED SECTOR";
+            for (uint32_t i = 0; signature[i]; i++) {
+                sector[i] = signature[i];
+            }
+            if (block_write(dev, 8, 1, sector) < 0) {
+                panic("ATA TEST: write failed\n");
+            }
+            for (uint32_t i = 0; i < BLOCK_SECTOR_SIZE; i++) {
+                sector[i] = 0;
+            }
+            if (block_read(dev, 8, 1, sector) < 0 ||
+                !ata_test_signature(sector, signature)) {
+                panic("ATA TEST: write readback failed\n");
+            }
+            kprintf("ATA TEST: %s read/write ok\n", dev->name);
+        } else {
+            if (block_read(dev, 8, 1, sector) < 0 ||
+                !ata_test_signature(sector, "NOS ATA PERSISTED SECTOR")) {
+                panic("ATA TEST: persistence verify failed\n");
+            }
+            kprintf("ATA TEST: %s persistence ok\n", dev->name);
         }
-        const char *signature = "NOS ATA PERSISTED SECTOR";
-        for (uint32_t i = 0; signature[i]; i++) {
-            sector[i] = signature[i];
-        }
-        if (block_write(dev, 8, 1, sector) < 0) {
-            panic("ATA TEST: write failed\n");
-        }
-        for (uint32_t i = 0; i < BLOCK_SECTOR_SIZE; i++) {
-            sector[i] = 0;
-        }
-        if (block_read(dev, 8, 1, sector) < 0 ||
-            !ata_test_signature(sector, signature)) {
-            panic("ATA TEST: write readback failed\n");
-        }
-        kprintf("ATA TEST: write and readback ok\n");
-    } else {
-        if (block_read(dev, 8, 1, sector) < 0 ||
-            !ata_test_signature(sector, "NOS ATA PERSISTED SECTOR")) {
-            panic("ATA TEST: persistence verify failed\n");
-        }
-        kprintf("ATA TEST: persistence ok\n");
     }
 }

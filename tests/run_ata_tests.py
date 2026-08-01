@@ -67,28 +67,32 @@ def main():
         for image in images:
             with open(image, "wb") as f:
                 f.truncate(2 * 1024 * 1024)
-        with open(images[0], "r+b") as f:
-            f.seek(7 * 512)
-            f.write(b"NOS ATA SEEDED SECTOR")
+            with open(image, "r+b") as f:
+                f.seek(7 * 512)
+                f.write(b"NOS ATA SEEDED SECTOR")
 
         boot(
             images,
             "write",
             ["ata: hda:", "ata: hdb:", "ata: hdc:", "ata: hdd:",
-             "ATA TEST: seeded read ok",
-             "ATA TEST: write and readback ok"],
+             "ATA TEST: hda read/write ok", "ATA TEST: hdb read/write ok",
+             "ATA TEST: hdc read/write ok", "ATA TEST: hdd read/write ok"],
             serial,
         )
-        with open(images[0], "rb") as f:
-            f.seek(8 * 512)
-            persisted = f.read(len(b"NOS ATA PERSISTED SECTOR"))
-        if persisted != b"NOS ATA PERSISTED SECTOR":
-            raise RuntimeError(f"host persistence check failed: {persisted!r}")
+        for image in images:
+            with open(image, "rb") as f:
+                f.seek(8 * 512)
+                persisted = f.read(len(b"NOS ATA PERSISTED SECTOR"))
+            if persisted != b"NOS ATA PERSISTED SECTOR":
+                raise RuntimeError(
+                    f"host persistence check failed for {image}: {persisted!r}"
+                )
 
         boot(
             images,
             "verify",
-            ["ata: hda:", "ATA TEST: persistence ok"],
+            ["ATA TEST: hda persistence ok", "ATA TEST: hdb persistence ok",
+             "ATA TEST: hdc persistence ok", "ATA TEST: hdd persistence ok"],
             serial,
         )
 
