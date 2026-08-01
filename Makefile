@@ -25,6 +25,7 @@ OBJ=boot/boot.o \
 drivers/keyboard.o \
 drivers/mouse.o \
 drivers/serial.o \
+kernel/console.o \
 kernel/copy_page_physical.o \
 kernel/gdt.o \
 kernel/elf.o \
@@ -61,6 +62,9 @@ drivers/mouse.o: drivers/mouse.c
 
 drivers/serial.o: drivers/serial.c
 	$(CC) -c drivers/serial.c -o drivers/serial.o $(CFLAGS)
+
+kernel/console.o: kernel/console.c
+	$(CC) -c kernel/console.c -o kernel/console.o $(CFLAGS)
 
 kernel/copy_page_physical.o: kernel/copy_page_physical.S
 	$(AS) kernel/copy_page_physical.S -o kernel/copy_page_physical.o $(AFLAGS)

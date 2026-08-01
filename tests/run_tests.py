@@ -356,6 +356,31 @@ def main():
                 (280, 164, (0, 0, 128), "restored window title focused"),
             ], "wm restore from taskbar")
 
+            # Terminal: menu item 0 spawns a window running the real sh over
+            # a console channel (slot 2 -> 220,184, 360x240, focused). Keys
+            # are forwarded to it; output of it AND its children renders in
+            # the window (and mirrors to serial, which we assert on).
+            mouse_to(30, 752)
+            click()
+            mouse_to(80, 672)
+            click()
+            sh.wait_for("nsh - NOS userspace shell", "terminal sh banner")
+            time.sleep(0.8)
+            dump("wm8.ppm", [
+                (300, 300, (0, 0, 0), "terminal body black"),
+            ], "wm terminal window")
+            for k in "hello":
+                sh.monitor("sendkey " + k)
+                time.sleep(0.15)
+            sh.monitor("sendkey ret")
+            sh.wait_for("Hello from a loaded ELF program",
+                        "hello ran inside the terminal")
+            for k in "exit":
+                sh.monitor("sendkey " + k)
+                time.sleep(0.15)
+            sh.monitor("sendkey ret")
+            sh.wait_for("bye!", "terminal shell exited")
+
             sh.monitor("sendkey esc")
             sh.wait_for("wm: exit", "wm exits to shell")
             sh.wait_for("nsh$", "prompt after wm")

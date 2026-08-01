@@ -76,6 +76,7 @@ void tasking_init(void)
     current_task->stack_mem = 0;
     current_task->kstack_top = 0; // pure ring0 task, esp0 never used
     current_task->brk = 0;
+    current_task->console_id = -1;
     memset((void *)current_task->files, 0, sizeof(current_task->files));
     current_task->page_directory = current_directory;
     current_task->owns_dir = 0; // shares the boot address space; never reaped
@@ -88,7 +89,7 @@ void tasking_init(void)
 }
 
 int spawn_task(const char *name, void *entry, struct page_directory *dir,
-               uint32_t user_esp)
+               uint32_t user_esp, int console_id)
 {
     mprintf(LOGLEVEL_DEBUG, "Spawning task %s with entry: 0x%08x\n", name, entry);
 
@@ -110,6 +111,7 @@ int spawn_task(const char *name, void *entry, struct page_directory *dir,
     task->stack_mem = stack_mem;
     task->kstack_top = user_esp ? (uint32_t)(stack_mem + stack_size) : 0;
     task->brk = user_esp ? USER_HEAP_BASE : 0;
+    task->console_id = console_id;
     memset(task->files, 0, sizeof(task->files));
 
     uint32_t *sp = (uint32_t *)(stack_mem + stack_size);

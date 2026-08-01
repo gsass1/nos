@@ -38,6 +38,9 @@ struct task
     // Program break for SYS_SBRK: the user heap occupies [USER_HEAP_BASE, brk).
     // 0 for kernel threads (no user heap).
     uint32_t brk;
+    // Console channel this task's terminal I/O is routed through, or -1 for
+    // the real VGA/keyboard console. Children spawned via SYS_EXEC inherit it.
+    int console_id;
     struct file files[TASK_MAX_FILES]; // fds 3.. index this as fd-3
     struct task *next;      // ready-queue link
     struct task *reap_next; // zombie-list link (used only after exit())
@@ -48,9 +51,10 @@ void tasking_init(void);
 // Create a runnable task that begins executing at `entry` in address space
 // `dir` (pass 0 to share the current directory). If `user_esp` is non-zero the
 // task starts in ring 3 with that stack pointer; otherwise it is a ring 0
-// kernel thread.
+// kernel thread. `console_id` routes the task's terminal I/O (-1 = the real
+// console).
 int spawn_task(const char *name, void *entry, struct page_directory *dir,
-               uint32_t user_esp);
+               uint32_t user_esp, int console_id);
 
 // Returns non-zero while a task with the given pid is still in the ready queue.
 int task_alive(int pid);

@@ -1,4 +1,5 @@
 #include <syscall.h>
+#include <console.h>
 #include <elf.h>
 #include <fb.h>
 #include <idt.h>
@@ -35,19 +36,39 @@ static void console_write(const char *buf, uint32_t len)
 
 static int sys_write(int fd, const char *buf, uint32_t len)
 {
-    (void)fd; // only the console exists for now
+    (void)fd; // fds 1 and 2 are both "the terminal" for now
     if (!buf) {
         return -1;
+    }
+    int cid = task_current() ? task_current()->console_id : -1;
+    if (cid >= 0) {
+        // Task lives in a terminal window: route output to its channel.
+        // Serial still sees everything, which keeps logs and tests whole.
+        console_out_write(cid, buf, len);
+        for (uint32_t i = 0; i < len; i++) {
+            serial_write_c(buf[i]);
+        }
+        return (int)len;
     }
     console_write(buf, len);
     return (int)len;
 }
 
-// Block until a key is available, yielding so other tasks run while we wait.
-// The keyboard IRQ fills kbd_getc's buffer; it works here because the trap gate
-// left interrupts enabled.
+// Block until a key (or terminal input byte) is available, yielding so other
+// tasks run while we wait. The keyboard IRQ fills kbd_getc's buffer; it works
+// here because the trap gate left interrupts enabled.
 static int sys_getc(void)
 {
+    int cid = task_current() ? task_current()->console_id : -1;
+    if (cid >= 0) {
+        for (;;) {
+            int c = console_in_getc(cid);
+            if (c >= 0) {
+                return c;
+            }
+            task_switch();
+        }
+    }
     char c;
     while ((c = kbd_getc()) == 0) {
         task_switch();
@@ -235,6 +256,24 @@ static int sys_pollc(void)
     return c ? (unsigned char)c : -1;
 }
 
+// Spawn a program attached to a fresh console channel (see console.h): its
+// terminal I/O flows through rings the caller drains/feeds, instead of the
+// real screen and keyboard. Returns the console id.
+static int sys_execc(const char *path, const char *const *argv)
+{
+    int cid = console_alloc();
+    if (cid < 0) {
+        return -1;
+    }
+    int pid = elf_exec(path, argv, cid);
+    if (pid < 0) {
+        console_free(cid);
+        return -1;
+    }
+    console_set_pid(cid, pid);
+    return cid;
+}
+
 static int sys_font(uint8_t *buf)
 {
     const uint8_t *font = fb_font_data();
@@ -261,12 +300,21 @@ void syscall_dispatch(struct regs *r)
         r->eax = (uint32_t)sys_readdir(r->ebx, (char *)r->ecx, r->edx);
         break;
     case SYS_CLEAR:
-        vga_clear();
+        // In a terminal window, "clear" is a form feed the terminal renders;
+        // only the real console clears the VGA text screen.
+        if (task_current() && task_current()->console_id >= 0) {
+            console_out_write(task_current()->console_id, "\f", 1);
+        } else {
+            vga_clear();
+        }
         r->eax = 0;
         break;
     case SYS_EXEC:
+        // Children inherit the parent's console, so programs a terminal's
+        // shell runs print into the same terminal window.
         r->eax = (uint32_t)elf_exec((const char *)r->ebx,
-                                    (const char *const *)r->ecx);
+                                    (const char *const *)r->ecx,
+                                    task_current()->console_id);
         break;
     case SYS_WAIT:
         r->eax = (uint32_t)sys_wait((int)r->ebx);
@@ -306,6 +354,23 @@ void syscall_dispatch(struct regs *r)
         break;
     case SYS_UPTIME:
         r->eax = timer_ticks * (1000 / PIT_HZ);
+        break;
+    case SYS_EXECC:
+        r->eax = (uint32_t)sys_execc((const char *)r->ebx,
+                                     (const char *const *)r->ecx);
+        break;
+    case SYS_CREAD:
+        r->eax = (uint32_t)console_out_read((int)r->ebx, (char *)r->ecx, r->edx);
+        break;
+    case SYS_CWRITE:
+        r->eax = (uint32_t)console_in_write((int)r->ebx, (const char *)r->ecx, r->edx);
+        break;
+    case SYS_CSTAT:
+        r->eax = (uint32_t)task_alive(console_pid((int)r->ebx));
+        break;
+    case SYS_CCLOSE:
+        console_free((int)r->ebx);
+        r->eax = 0;
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

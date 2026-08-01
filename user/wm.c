@@ -28,8 +28,14 @@
 
 #define MENU_W    160
 #define MENU_ITEM_H 24
-#define MENU_ITEMS  2
+#define MENU_ITEMS  3
 #define MENU_H    (MENU_ITEMS * MENU_ITEM_H + 8)
+
+// Terminal windows: fixed character grid rendered into the body.
+#define TCOLS 42
+#define TROWS 12
+#define COL_TERM_BG 0x00000000
+#define COL_TERM_FG 0x00E0E0E0
 
 #define START_W   64   // taskbar start-button width (incl. left margin)
 #define ENTRY_X0  72   // first taskbar entry
@@ -45,6 +51,11 @@ struct win
     char title[24];
     char text[40];
     int tlen;
+    // Terminal windows host a real process via a console channel.
+    int term;
+    int cid;
+    char grid[TROWS][TCOLS + 1];
+    int trow, tcol;
 };
 
 static struct win wins[MAXWIN];
@@ -153,6 +164,8 @@ static int spawn(const char *title)
     w->h = 240;
     w->text[0] = '\0';
     w->tlen = 0;
+    w->term = 0;
+    w->cid = -1;
     if (title) {
         scopy(w->title, title, sizeof(w->title));
     } else {
@@ -182,9 +195,18 @@ static void draw_window(struct win *w, int focused)
     gfx_frame(&bb, bxc, by, BTN_SZ, BTN_SZ, COL_BORDER);
     gfx_char(&bb, bxc + 5, by + 1, 'x', COL_TEXT);
 
-    gfx_text(&bb, w->x + 12, w->y + TITLE_H + 12, "NOS window", COL_TEXT);
-    gfx_text(&bb, w->x + 12, w->y + TITLE_H + 36, "type: ", COL_TEXT);
-    gfx_text(&bb, w->x + 12 + 6 * 8, w->y + TITLE_H + 36, w->text, COL_TEXT);
+    if (w->term) {
+        gfx_fill(&bb, w->x + 1, w->y + TITLE_H, w->w - 2, w->h - TITLE_H - 1,
+                 COL_TERM_BG);
+        for (int r = 0; r < TROWS; r++) {
+            gfx_text(&bb, w->x + 8, w->y + TITLE_H + 6 + r * 16, w->grid[r],
+                     COL_TERM_FG);
+        }
+    } else {
+        gfx_text(&bb, w->x + 12, w->y + TITLE_H + 12, "NOS window", COL_TEXT);
+        gfx_text(&bb, w->x + 12, w->y + TITLE_H + 36, "type: ", COL_TEXT);
+        gfx_text(&bb, w->x + 12 + 6 * 8, w->y + TITLE_H + 36, w->text, COL_TEXT);
+    }
 
     // Resize grip: a few dots in the bottom-right corner.
     for (int i = 0; i < 3; i++) {
@@ -238,8 +260,9 @@ static void draw_all(int cx, int cy)
         int my = bb.h - TASKBAR_H - MENU_H;
         gfx_fill(&bb, 4, my, MENU_W, MENU_H, COL_MENU);
         gfx_frame(&bb, 4, my, MENU_W, MENU_H, COL_BORDER);
-        gfx_text(&bb, 16, my + 8, "new window", COL_TEXT);
-        gfx_text(&bb, 16, my + 8 + MENU_ITEM_H, "about", COL_TEXT);
+        gfx_text(&bb, 16, my + 8, "terminal", COL_TEXT);
+        gfx_text(&bb, 16, my + 8 + MENU_ITEM_H, "new window", COL_TEXT);
+        gfx_text(&bb, 16, my + 8 + 2 * MENU_ITEM_H, "about", COL_TEXT);
     }
 
     gfx_cursor(&bb, cx, cy);
@@ -247,6 +270,86 @@ static void draw_all(int cx, int cy)
     int n = bb.w * bb.h;
     for (int i = 0; i < n; i++) {
         fb[i] = bb.buf[i];
+    }
+}
+
+static void term_clear(struct win *w)
+{
+    for (int r = 0; r < TROWS; r++) {
+        for (int c = 0; c < TCOLS; c++) {
+            w->grid[r][c] = ' ';
+        }
+        w->grid[r][TCOLS] = '\0';
+    }
+    w->trow = 0;
+    w->tcol = 0;
+}
+
+static void term_scroll(struct win *w)
+{
+    for (int r = 0; r < TROWS - 1; r++) {
+        scopy(w->grid[r], w->grid[r + 1], TCOLS + 1);
+    }
+    for (int c = 0; c < TCOLS; c++) {
+        w->grid[TROWS - 1][c] = ' ';
+    }
+    w->trow = TROWS - 1;
+    w->tcol = 0;
+}
+
+static void term_feed(struct win *w, const char *buf, int n)
+{
+    for (int i = 0; i < n; i++) {
+        char c = buf[i];
+        if (c == '\n') {
+            w->tcol = 0;
+            if (++w->trow == TROWS) {
+                term_scroll(w);
+            }
+        } else if (c == '\r') {
+            w->tcol = 0;
+        } else if (c == '\b') {
+            if (w->tcol > 0) {
+                w->tcol--;
+            }
+        } else if (c == '\f') { // SYS_CLEAR from inside the terminal
+            term_clear(w);
+        } else if (c >= 32 && c < 127) {
+            w->grid[w->trow][w->tcol] = c;
+            if (++w->tcol == TCOLS) {
+                w->tcol = 0;
+                if (++w->trow == TROWS) {
+                    term_scroll(w);
+                }
+            }
+        }
+    }
+}
+
+static void spawn_terminal(void)
+{
+    int slot = spawn("terminal");
+    if (slot < 0) {
+        return;
+    }
+    struct win *w = &wins[slot];
+    term_clear(w);
+    w->cid = execc("sh", 0);
+    if (w->cid < 0) {
+        close_win(slot);
+        return;
+    }
+    w->term = 1;
+}
+
+// Ask the shell inside to exit (best effort), then drop the channel.
+static void close_terminal(struct win *w)
+{
+    if (w->cid >= 0) {
+        cwrite(w->cid, "exit\n", 5);
+        sleep(50); // give it a beat to run the builtin
+        cclose(w->cid);
+        w->cid = -1;
     }
 }
 
@@ -316,7 +419,12 @@ void _start(void)
                 continue;
             }
             struct win *fw = &wins[t];
-            if (c == '\b') {
+            if (fw->term) {
+                // Forward everything (incl. \n and \b) to the process in the
+                // terminal; its own echo comes back through the out ring.
+                char ch = (char)c;
+                cwrite(fw->cid, &ch, 1);
+            } else if (c == '\b') {
                 if (fw->tlen > 0) {
                     fw->text[--fw->tlen] = '\0';
                 }
@@ -335,8 +443,10 @@ void _start(void)
             if (m.x >= 4 && m.x < 4 + MENU_W && m.y >= my && m.y < my + MENU_H) {
                 int item = (m.y - my - 4) / MENU_ITEM_H;
                 if (item == 0) {
-                    spawn(0);
+                    spawn_terminal();
                 } else if (item == 1) {
+                    spawn(0);
+                } else if (item == 2) {
                     spawn_about();
                 }
             }
@@ -381,6 +491,9 @@ void _start(void)
                     int bxc = hw->x + hw->w - BTN_SZ - 3;
                     int in_y = m.y >= by && m.y < by + BTN_SZ;
                     if (in_y && m.x >= bxc && m.x < bxc + BTN_SZ) {
+                        if (hw->term) {
+                            close_terminal(hw);
+                        }
                         close_win(wi);
                     } else if (in_y && m.x >= bxm && m.x < bxm + BTN_SZ) {
                         wins[wi].min = 1;
@@ -429,12 +542,29 @@ void _start(void)
             resizing = -1;
         }
 
+        // Drain every terminal's process output into its grid.
+        for (int i = 0; i < MAXWIN; i++) {
+            if (wins[i].alive && wins[i].term && wins[i].cid >= 0) {
+                char cbuf[256];
+                int n;
+                while ((n = cread(wins[i].cid, cbuf, sizeof(cbuf))) > 0) {
+                    term_feed(&wins[i], cbuf, n);
+                }
+            }
+        }
+
         prev = m;
         draw_all(m.x, m.y);
         sleep(15);
     }
 
 out:
+    // Ask any shells still running in terminals to exit before we leave.
+    for (int i = 0; i < MAXWIN; i++) {
+        if (wins[i].alive && wins[i].term) {
+            close_terminal(&wins[i]);
+        }
+    }
     fboff();
     put("wm: exit\n");
     exit(0);

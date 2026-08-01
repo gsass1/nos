@@ -61,6 +61,16 @@ static inline int pollc(void)                 { return sys0(SYS_POLLC); }
 static inline int getfont(void *buf8192)      { return sys1(SYS_FONT, (int)buf8192); }
 static inline int uptime_ms(void)             { return sys0(SYS_UPTIME); }
 
+// Console channels: run a program in a captured terminal (see SYS_EXECC).
+static inline int execc(const char *path, char *const argv[])
+{
+    return sys3(SYS_EXECC, (int)path, (int)argv, 0);
+}
+static inline int cread(int cid, void *buf, int len)  { return sys3(SYS_CREAD, cid, (int)buf, len); }
+static inline int cwrite(int cid, const void *buf, int len) { return sys3(SYS_CWRITE, cid, (int)buf, len); }
+static inline int cstat(int cid)                      { return sys1(SYS_CSTAT, cid); }
+static inline int cclose(int cid)                     { return sys1(SYS_CCLOSE, cid); }
+
 // Enters graphics mode; returns the mapped 32bpp framebuffer, or (void *)-1.
 static inline void *fbmap(void)
 {

@@ -62,7 +62,8 @@ struct elf32_phdr
 // start it as a ring-3 task. `argv` is a NULL-terminated array of argument
 // strings in the CALLER's address space (or NULL for none); they are copied
 // onto the new process's stack so its _start receives (int argc, char **argv).
+// `console_id` routes the program's terminal I/O (-1 = the real console).
 // Returns the new task id, or -1 on failure.
-int elf_exec(const char *path, const char *const *argv);
+int elf_exec(const char *path, const char *const *argv, int console_id);
 
 #endif
