@@ -157,6 +157,42 @@ def check_screendump(path):
             failures.append(f"screendump pixel ({x},{y}) = {got}, expected {rgb}")
 
 
+def mouse_reset(sh):
+    """Drive the cursor into the top-left corner: position clamping turns
+    repeated large negative moves into an absolute (0,0)."""
+    for _ in range(8):
+        sh.monitor("mouse_move -300 -300")
+        time.sleep(0.1)
+
+
+def mouse_step(sh, dx, dy):
+    """Move in <=120px chunks so PS/2 9-bit deltas never clamp."""
+    while dx or dy:
+        sx = max(-120, min(120, dx))
+        sy = max(-120, min(120, dy))
+        sh.monitor(f"mouse_move {sx} {sy}")
+        dx -= sx
+        dy -= sy
+        time.sleep(0.15)
+
+
+def sample(path, checks, desc):
+    """checks: list of (x, y, (r,g,b), what)."""
+    try:
+        w, h, px = read_ppm(path)
+    except (OSError, ValueError, IndexError) as e:
+        failures.append(f"{desc}: screendump unreadable: {e}")
+        return
+    if (w, h) != (1024, 768):
+        failures.append(f"{desc}: screendump is {w}x{h}, expected 1024x768")
+        return
+    for x, y, rgb, what in checks:
+        off = (y * w + x) * 3
+        got = tuple(px[off : off + 3])
+        if got != rgb:
+            failures.append(f"{desc}: ({x},{y}) [{what}] = {got}, expected {rgb}")
+
+
 def main():
     if not (os.path.exists(KERNEL) and os.path.exists(INITRD)):
         print("Build first: make && make initrd", file=sys.stderr)
@@ -230,6 +266,48 @@ def main():
             check_screendump(ppm)
             sh.wait_for("fbtest: done", "fbtest back to text mode")
             sh.wait_for("nsh$", "prompt after fbtest")
+
+        # Window manager: desktop + taskbar render, and dragging a window by
+        # its title bar moves it. Initial layout: win1 (140,120,400x300)
+        # unfocused (gray title), win2 (420,260,360x240) focused (navy title).
+        sh.type_line("wm")
+        if sh.wait_for("wm: started", "wm start"):
+            time.sleep(1.0)
+            wm1 = os.path.join(REPO, "tests", "wm1.ppm")
+            for f in (wm1,):
+                if os.path.exists(f):
+                    os.remove(f)
+            sh.monitor("screendump " + wm1)
+            time.sleep(1.5)
+            sample(wm1, [
+                (8, 8, (0, 128, 128), "desktop"),
+                (512, 760, (192, 192, 192), "taskbar"),
+                (340, 132, (128, 128, 128), "win1 title (unfocused)"),
+                (340, 200, (255, 255, 255), "win1 body"),
+                (600, 272, (0, 0, 128), "win2 title (focused)"),
+            ], "wm initial")
+
+            # Drag win2's title bar (grab at 600,272) by +120,+60.
+            mouse_reset(sh)
+            mouse_step(sh, 600, 272)
+            sh.monitor("mouse_button 1")
+            time.sleep(0.4)
+            mouse_step(sh, 120, 60)
+            sh.monitor("mouse_button 0")
+            time.sleep(0.8)
+            wm2 = os.path.join(REPO, "tests", "wm2.ppm")
+            if os.path.exists(wm2):
+                os.remove(wm2)
+            sh.monitor("screendump " + wm2)
+            time.sleep(1.5)
+            sample(wm2, [
+                (700, 330, (0, 0, 128), "win2 title after drag"),
+                (600, 272, (0, 128, 128), "desktop where win2 was"),
+            ], "wm after drag")
+
+            sh.monitor("sendkey q")
+            sh.wait_for("wm: exit", "wm exits to shell")
+            sh.wait_for("nsh$", "prompt after wm")
 
         # The kernel never panicked.
         if "panic:" in sh.serial():

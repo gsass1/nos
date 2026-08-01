@@ -15,3 +15,5 @@ LOG
 MON
 tests/serial.log
 tests/screen.ppm
+tests/wm1.ppm
+tests/wm2.ppm

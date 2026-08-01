@@ -235,6 +235,16 @@ static int sys_pollc(void)
     return c ? (unsigned char)c : -1;
 }
 
+static int sys_font(uint8_t *buf)
+{
+    const uint8_t *font = fb_font_data();
+    if (!buf || !font) {
+        return -1;
+    }
+    memcpy(buf, font, FB_FONT_BYTES);
+    return 0;
+}
+
 void syscall_dispatch(struct regs *r)
 {
     switch (r->eax) {
@@ -290,6 +300,9 @@ void syscall_dispatch(struct regs *r)
         break;
     case SYS_POLLC:
         r->eax = (uint32_t)sys_pollc();
+        break;
+    case SYS_FONT:
+        r->eax = (uint32_t)sys_font((uint8_t *)r->ebx);
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

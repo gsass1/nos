@@ -162,6 +162,13 @@ int fb_present(void)
     return present;
 }
 
+// The BIOS 8x16 text font saved at init: 256 glyphs, 32 bytes each (rows 0-15
+// used). Userspace text rendering fetches it via SYS_FONT.
+const uint8_t *fb_font_data(void)
+{
+    return font_saved ? saved_font : 0;
+}
+
 uint32_t fb_phys_addr(void)
 {
     return phys;
