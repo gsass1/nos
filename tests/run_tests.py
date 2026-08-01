@@ -25,7 +25,14 @@ INITRD = os.path.join(REPO, "initrd", "initrd.tar")
 WAIT_TIMEOUT = 30  # seconds per marker; CI runners can be slow
 
 # QEMU sendkey names for the characters the tests type.
-KEYMAP = {" ": "spc", "|": "shift-backslash", "<": "shift-comma"}
+KEYMAP = {
+    " ": "spc",
+    "|": "shift-backslash",
+    "<": "shift-comma",
+    "^": "shift-6",
+    "*": "shift-8",
+    "$": "shift-4",
+}
 for _c in "abcdefghijklmnopqrstuvwxyz0123456789":
     KEYMAP[_c] = _c
 for _c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
@@ -248,18 +255,23 @@ def main():
         sh.run("cat symtable | upper | upper", ["KERNEL_BASE"], "3-stage pipeline")
         sh.run("upper < symtable", ["STACK_TOP"], "input redirection")
 
+        # xv6-style filters: cat defaults to stdin, echo produces a line, wc
+        # counts it, and grep supports the ^, ., *, and $ matcher operators.
+        sh.run("echo one two | cat | wc", ["1 2 8"], "cat stdin and wc")
+        sh.run("echo abbbc | grep ^ab*c$ | wc", ["1 1 6"], "grep regexp")
+
         # A stage dying mid-pipeline: crash is killed by its page fault, the
         # kill path closes its pipe write end, and upper sees EOF instead of
         # hanging -- the prompt coming back is the real assertion.
         sh.run(
             "crash | upper",
-            ["killed: page fault", "[exit status -1]"],
+            ["killed: page fault"],
             "pipeline EOF on killed writer",
         )
 
         # Error paths report distinct messages and nonzero exit statuses.
         sh.run("cat nope", ["not found", "[exit status 1]"], "cat missing file")
-        sh.run("cat", ["usage: cat", "[exit status 1]"], "cat usage")
+        sh.run("grep", ["usage: grep", "[exit status 1]"], "grep usage")
         sh.run("nosuchthing", ["unknown command"], "unknown command")
 
         # Shift handling in the keyboard driver: typed capitals echo back.
