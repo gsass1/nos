@@ -110,6 +110,51 @@ class Shell:
             self.proc.kill()
 
 
+def read_ppm(path):
+    """Parse a binary (P6) PPM into (width, height, pixel_bytes)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    tokens = []
+    i = 0
+    while len(tokens) < 4:
+        while i < len(data) and data[i : i + 1].isspace():
+            i += 1
+        if data[i : i + 1] == b"#":
+            while i < len(data) and data[i] != 0x0A:
+                i += 1
+            continue
+        start = i
+        while i < len(data) and not data[i : i + 1].isspace():
+            i += 1
+        tokens.append(data[start:i])
+    i += 1  # single whitespace after maxval
+    w, h = int(tokens[1]), int(tokens[2])
+    return w, h, data[i:]
+
+
+def check_screendump(path):
+    """fbtest draws red/green/blue/white quadrants; sample each center."""
+    try:
+        w, h, px = read_ppm(path)
+    except (OSError, ValueError, IndexError) as e:
+        failures.append(f"screendump unreadable: {e}")
+        return
+    if (w, h) != (1024, 768):
+        failures.append(f"screendump is {w}x{h}, expected 1024x768 (graphics mode not active?)")
+        return
+    expected = {
+        (w // 4, h // 4): (255, 0, 0),
+        (3 * w // 4, h // 4): (0, 255, 0),
+        (w // 4, 3 * h // 4): (0, 0, 255),
+        (3 * w // 4, 3 * h // 4): (255, 255, 255),
+    }
+    for (x, y), rgb in expected.items():
+        off = (y * w + x) * 3
+        got = tuple(px[off : off + 3])
+        if got != rgb:
+            failures.append(f"screendump pixel ({x},{y}) = {got}, expected {rgb}")
+
+
 def main():
     if not (os.path.exists(KERNEL) and os.path.exists(INITRD)):
         print("Build first: make && make initrd", file=sys.stderr)
@@ -147,6 +192,24 @@ def main():
             "crash isolation",
         )
         sh.run("hello", ["Hello from a loaded ELF program"], "shell alive after crash")
+
+        # Framebuffer: fbtest switches to 1024x768x32 graphics, draws four
+        # colored quadrants and holds them; screendump the emulated display
+        # and check actual pixel colors, then confirm text mode comes back.
+        ppm = os.path.join(REPO, "tests", "screen.ppm")
+        if os.path.exists(ppm):
+            os.remove(ppm)
+        sh.type_line("fbtest")
+        if sh.wait_for("fbtest: pattern drawn", "fbtest draw"):
+            sh.monitor("screendump " + ppm)
+            deadline = time.time() + 10
+            while time.time() < deadline and not (
+                os.path.exists(ppm) and os.path.getsize(ppm) > 0
+            ):
+                time.sleep(0.2)
+            check_screendump(ppm)
+            sh.wait_for("fbtest: done", "fbtest back to text mode")
+            sh.wait_for("nsh$", "prompt after fbtest")
 
         # The kernel never panicked.
         if "panic:" in sh.serial():

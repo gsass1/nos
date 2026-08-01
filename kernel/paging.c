@@ -80,8 +80,13 @@ void free_frame(struct page *page)
     if(!(frame = page->frame)) {
         return;
     } else {
-        // clear_frame expects a physical address, not a frame index.
-        clear_frame(frame * 0x1000);
+        // MMIO mappings (e.g. the framebuffer) point beyond RAM: they are not
+        // in the allocator bitmap, and clear_frame on them would write far
+        // past it into the heap. Just unmap those.
+        if(frame < nframes) {
+            // clear_frame expects a physical address, not a frame index.
+            clear_frame(frame * 0x1000);
+        }
         page->frame = 0x0;
         page->present = 0;
     }

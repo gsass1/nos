@@ -53,6 +53,17 @@ static inline void *sbrk(int incr)
     return (void *)r;
 }
 
+static inline int fbinfo(struct fb_info *out) { return sys1(SYS_FBINFO, (int)out); }
+static inline int fboff(void)                 { return sys0(SYS_FBOFF); }
+static inline int sleep(int ms)               { return sys1(SYS_SLEEP, ms); }
+
+// Enters graphics mode; returns the mapped 32bpp framebuffer, or (void *)-1.
+static inline void *fbmap(void)
+{
+    int r = sys0(SYS_FBMAP);
+    return (void *)r;
+}
+
 static inline int slen(const char *s)
 {
     int n = 0;

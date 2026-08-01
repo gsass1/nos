@@ -20,13 +20,14 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/fbtest
 OBJ=boot/boot.o \
 drivers/keyboard.o \
 drivers/serial.o \
 kernel/copy_page_physical.o \
 kernel/gdt.o \
 kernel/elf.o \
+kernel/fb.o \
 kernel/idt.o \
 kernel/initrd.o \
 kernel/interrupt.o \
@@ -36,6 +37,7 @@ kernel/kmalloc.o \
 kernel/main.o \
 kernel/mutex.o \
 kernel/paging.o \
+kernel/pci.o \
 kernel/pic.o \
 kernel/pit.o \
 kernel/string.o \
@@ -65,6 +67,9 @@ kernel/gdt.o: kernel/gdt.c
 kernel/elf.o: kernel/elf.c
 	$(CC) -c kernel/elf.c -o kernel/elf.o $(CFLAGS)
 
+kernel/fb.o: kernel/fb.c
+	$(CC) -c kernel/fb.c -o kernel/fb.o $(CFLAGS)
+
 kernel/idt.o: kernel/idt.c
 	$(CC) -c kernel/idt.c -o kernel/idt.o $(CFLAGS)
 
@@ -91,6 +96,9 @@ kernel/mutex.o: kernel/mutex.c
 
 kernel/paging.o: kernel/paging.c
 	$(CC) -c kernel/paging.c -o kernel/paging.o $(CFLAGS)
+
+kernel/pci.o: kernel/pci.c
+	$(CC) -c kernel/pci.c -o kernel/pci.o $(CFLAGS)
 
 kernel/pic.o: kernel/pic.c
 	$(CC) -c kernel/pic.c -o kernel/pic.o $(CFLAGS)
@@ -142,11 +150,15 @@ initrd/cat: user/cat.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/cat.c -o user/cat.o $(CFLAGS)
 	$(LD) -T user/user.ld user/cat.o -o initrd/cat
 
+initrd/fbtest: user/fbtest.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/fbtest.c -o user/fbtest.o $(CFLAGS)
+	$(LD) -T user/user.ld user/fbtest.o -o initrd/fbtest
+
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat fbtest
 
 initrd: $(INITRD)
 

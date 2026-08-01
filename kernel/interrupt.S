@@ -168,6 +168,7 @@ _asm_exc_PF:
 
 _asm_irq_0:
     SAVE_REGS
+    inc dword ptr [timer_ticks]
     # Hand the current trap frame to the scheduler and adopt whatever stack it
     # returns. When it picks a different task, mov esp swaps us onto that task's
     # kernel stack; RESTORE_REGS + iret below then resume it. The EOI is sent

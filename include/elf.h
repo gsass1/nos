@@ -50,6 +50,9 @@ struct elf32_phdr
 #define USER_HEAP_BASE 0x60000000U
 #define USER_HEAP_MAX  0x70000000U
 
+// SYS_FBMAP maps the linear framebuffer here in the calling process.
+#define USER_FB_BASE   0x78000000U
+
 // exec() argument limits: how many argv entries and how many total string
 // bytes elf_exec will copy onto the new process's stack.
 #define EXEC_MAX_ARGS    16

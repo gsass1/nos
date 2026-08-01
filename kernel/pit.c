@@ -33,6 +33,10 @@ MODULE("PIT ");
 #define PIT_OCW_COUNTER_1 0x40 //01000000
 #define PIT_OCW_COUNTER_2 0x80 //10000000
 
+// Incremented by _asm_irq_0 on every timer interrupt (PIT_HZ per second).
+// The only monotonic clock the kernel has; SYS_SLEEP counts it.
+volatile uint32_t timer_ticks = 0;
+
 void pit_init(void)
 {
     mprintf(LOGLEVEL_DEFAULT, "Initializing PIT\n");

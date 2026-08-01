@@ -1,4 +1,5 @@
 #include <elf.h>
+#include <fb.h>
 #include <gdt.h>
 #include <idt.h>
 #include <initrd.h>
@@ -77,7 +78,7 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
     idt_init();
     pic_init();
     pit_init();
-    pit_init_timer(200);
+    pit_init_timer(PIT_HZ);
 
 	// We can enable interrupts now
     asm volatile("sti");
@@ -95,6 +96,9 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 
 	// PS/2 keyboard initalization
     kbd_init();
+
+	// Probe for the QEMU/Bochs display device (framebuffer for SYS_FBMAP).
+    fb_init();
 
 	// Initialize initial ram disk
     fs_root = initrd_init((void *)(*(uint32_t *)mbootptr->mods_addr));

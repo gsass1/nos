@@ -1,8 +1,10 @@
 #include <syscall.h>
 #include <elf.h>
+#include <fb.h>
 #include <idt.h>
 #include <kernel.h>
 #include <keyboard.h>
+#include <pit.h>
 #include <serial.h>
 #include <string.h>
 #include <task.h>
@@ -161,6 +163,61 @@ static int sys_sbrk(int incr)
     return (int)old;
 }
 
+static int sys_fbinfo(struct fb_info *out)
+{
+    if (!out || !fb_present()) {
+        return -1;
+    }
+    out->width = FB_WIDTH;
+    out->height = FB_HEIGHT;
+    out->pitch = FB_PITCH;
+    out->bpp = FB_BPP;
+    return 0;
+}
+
+// Switch to graphics mode and map the framebuffer into the calling process at
+// USER_FB_BASE. The pages are MMIO, not RAM: PTEs are written directly and
+// free_frame knows to skip the allocator bitmap for them on process exit.
+static int sys_fbmap(void)
+{
+    struct task *t = task_current();
+    if (!fb_present() || !t->brk /* kernel thread */) {
+        return -1;
+    }
+    if (fb_enable() < 0) {
+        return -1;
+    }
+    uint32_t phys = fb_phys_addr();
+    for (uint32_t off = 0; off < FB_SIZE; off += 0x1000) {
+        struct page *pg = get_page(USER_FB_BASE + off, 1, t->page_directory);
+        pg->present = 1;
+        pg->rw = 1;
+        pg->user = 1;
+        pg->frame = (phys + off) >> 12;
+    }
+    return (int)USER_FB_BASE;
+}
+
+static int sys_fboff(void)
+{
+    fb_disable();
+    // The text plane shares VRAM with the framebuffer, so graphics drawing
+    // trashed whatever text was on screen. Reset to a clean console.
+    vga_clear();
+    return 0;
+}
+
+// Block for at least ms milliseconds, yielding the CPU while waiting.
+static int sys_sleep(uint32_t ms)
+{
+    uint32_t ticks = (ms * PIT_HZ + 999) / 1000;
+    uint32_t start = timer_ticks;
+    while (timer_ticks - start < ticks) {
+        task_switch();
+    }
+    return 0;
+}
+
 void syscall_dispatch(struct regs *r)
 {
     switch (r->eax) {
@@ -198,6 +255,18 @@ void syscall_dispatch(struct regs *r)
         break;
     case SYS_SBRK:
         r->eax = (uint32_t)sys_sbrk((int)r->ebx);
+        break;
+    case SYS_FBINFO:
+        r->eax = (uint32_t)sys_fbinfo((struct fb_info *)r->ebx);
+        break;
+    case SYS_FBMAP:
+        r->eax = (uint32_t)sys_fbmap();
+        break;
+    case SYS_FBOFF:
+        r->eax = (uint32_t)sys_fboff();
+        break;
+    case SYS_SLEEP:
+        r->eax = (uint32_t)sys_sleep(r->ebx);
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

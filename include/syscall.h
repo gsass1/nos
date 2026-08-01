@@ -16,6 +16,19 @@
 #define SYS_READ    8   // read(int fd, buf, len)      -> bytes read, 0 at EOF, -1 on error
 #define SYS_CLOSE   9   // close(int fd)               -> 0, or -1
 #define SYS_SBRK    10  // sbrk(int incr)              -> previous break, or -1
+#define SYS_FBINFO  11  // fbinfo(struct fb_info *out) -> 0, or -1 if no display
+#define SYS_FBMAP   12  // fbmap(void)                 -> fb pointer (enables graphics mode), or -1
+#define SYS_FBOFF   13  // fboff(void)                 -> 0; back to text mode
+#define SYS_SLEEP   14  // sleep(uint ms)              -> 0 after at least ms elapsed
+
+// Returned by SYS_FBINFO. pitch is in bytes; pixels are 32-bit 0x00RRGGBB.
+struct fb_info
+{
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint32_t bpp;
+};
 
 // Saved register frame as laid out by SAVE_REGS in interrupt.S, from the
 // lowest saved address upward. The dispatcher reads args from here and writes
