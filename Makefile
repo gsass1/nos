@@ -71,9 +71,15 @@ BEARSSL_SRC=$(filter-out %/ghash_pclmul.c %/chacha20_sse2.c %/sysrng.c \
     $(wildcard $(BEARSSL_DIR)/src/symcipher/aes_x86ni*.c), \
     $(wildcard $(BEARSSL_DIR)/src/*.c $(BEARSSL_DIR)/src/*/*.c))
 BEARSSL_OBJ=$(patsubst $(BEARSSL_DIR)/src/%.c,$(BEARSSL_BUILD)/%.o,$(BEARSSL_SRC))
+# The BR_USE_* pins disable BearSSL's host-OS auto-detection: a Linux-target
+# cross compiler (CI's i686-linux-gnu-gcc) defines __unix__/__linux__, which
+# would pull in <time.h>/urandom paths that don't exist on NOS. wget provides
+# the validation time (SYS_TIME) and entropy explicitly.
 BEARSSL_CFLAGS=-I$(BEARSSL_DIR)/inc -I$(BEARSSL_DIR)/src -Iuser/libc \
     -std=gnu99 -ffreestanding -O2 -g \
-    -DBR_AES_X86NI=0 -DBR_SSE2=0 -DBR_RDRAND=0
+    -DBR_AES_X86NI=0 -DBR_SSE2=0 -DBR_RDRAND=0 \
+    -DBR_USE_UNIX_TIME=0 -DBR_USE_WIN32_TIME=0 \
+    -DBR_USE_URANDOM=0 -DBR_USE_GETENTROPY=0 -DBR_USE_WIN32_RAND=0
 BEARSSL_LIB=$(BEARSSL_BUILD)/libbearssl.a
 AR=$(TOOLPREFIX)ar
 
