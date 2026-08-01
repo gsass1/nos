@@ -1,17 +1,23 @@
 AS=i686-elf-as
 AFLAGS=-g
 CC=i686-elf-gcc
+LD=i686-elf-ld
 CFLAGS=-I./include/ -std=gnu99 -ffreestanding -nostdlib -g -Wall -Wextra
 LFLAGS=-lgcc
 NM=i686-elf-nm
 BIN=kernel.elf
 ISO=gianos.iso
 INITRD=initrd/initrd.tar
+
+# Freestanding userspace programs bundled into the initrd. They talk to the
+# kernel only through the int 0x80 syscall ABI (include/syscall.h).
+USERPROGS=initrd/hello initrd/sh
 OBJ=boot/boot.o \
 drivers/keyboard.o \
 drivers/serial.o \
 kernel/copy_page_physical.o \
 kernel/gdt.o \
+kernel/elf.o \
 kernel/idt.o \
 kernel/initrd.o \
 kernel/interrupt.o \
@@ -24,6 +30,7 @@ kernel/paging.o \
 kernel/pic.o \
 kernel/pit.o \
 kernel/string.o \
+kernel/syscall.o \
 kernel/task.o \
 kernel/vfs.o \
 kernel/vga.o \
@@ -45,6 +52,9 @@ kernel/copy_page_physical.o: kernel/copy_page_physical.S
 
 kernel/gdt.o: kernel/gdt.c
 	$(CC) -c kernel/gdt.c -o kernel/gdt.o $(CFLAGS)
+
+kernel/elf.o: kernel/elf.c
+	$(CC) -c kernel/elf.c -o kernel/elf.o $(CFLAGS)
 
 kernel/idt.o: kernel/idt.c
 	$(CC) -c kernel/idt.c -o kernel/idt.o $(CFLAGS)
@@ -82,6 +92,9 @@ kernel/pit.o: kernel/pit.c
 kernel/string.o: kernel/string.c
 	$(CC) -c kernel/string.c -o kernel/string.o $(CFLAGS)
 
+kernel/syscall.o: kernel/syscall.c
+	$(CC) -c kernel/syscall.c -o kernel/syscall.o $(CFLAGS)
+
 kernel/task.o: kernel/task.c
 	$(CC) -c kernel/task.c -o kernel/task.o $(CFLAGS)
 
@@ -102,11 +115,21 @@ iso: $(BIN) $(INITRD)
 	cp $(INITRD) iso/initrd.tar
 	mkisofs -R -b boot/grub/stage2_eltorito -no-emul-boot -boot-load-size 4 -boot-info-table -o $(ISO) iso
 
-# Regenerate the initrd containing an address-sorted symbol table matching
-# the current kernel build, so backtraces resolve to the right names.
-$(INITRD): $(BIN)
+# Build a freestanding user program: compile, then link at the user base
+# address (see user/user.ld) into a flat ELF the kernel's elf_exec() loads.
+initrd/hello: user/hello.c user/user.ld include/syscall.h
+	$(CC) -c user/hello.c -o user/hello.o $(CFLAGS)
+	$(LD) -T user/user.ld user/hello.o -o initrd/hello
+
+initrd/sh: user/sh.c user/user.ld include/syscall.h
+	$(CC) -c user/sh.c -o user/sh.o $(CFLAGS)
+	$(LD) -T user/user.ld user/sh.o -o initrd/sh
+
+# Regenerate the initrd: an address-sorted symbol table matching the current
+# kernel build (so backtraces resolve names) plus the bundled user programs.
+$(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh
 
 initrd: $(INITRD)
 
@@ -119,3 +142,4 @@ clean:
 	rm -f $(OBJ)
 	rm -f $(BIN)
 	rm -f $(ISO)
+	rm -f user/*.o $(USERPROGS)

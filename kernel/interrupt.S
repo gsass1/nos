@@ -1,4 +1,4 @@
-.global _asm_default_int, _asm_reserved_int, _asm_exc_DIV0, _asm_exc_DEBUG, _asm_exc_BP, _asm_exc_NOMATH, _asm_exc_MF, _asm_exc_TSS, _asm_exc_SWAP, _asm_exc_AC, _asm_exc_MC, _asm_exc_XM, _asm_exc_NMI, _asm_exc_OVRFLW, _asm_exc_BOUNDS, _asm_exc_OPCODE, _asm_exc_DOUBLEF, _asm_exc_STACKF, _asm_exc_GP, _asm_exc_PF, _asm_irq_0, _asm_irq_1, _asm_irq_7, task_switch
+.global _asm_default_int, _asm_reserved_int, _asm_exc_DIV0, _asm_exc_DEBUG, _asm_exc_BP, _asm_exc_NOMATH, _asm_exc_MF, _asm_exc_TSS, _asm_exc_SWAP, _asm_exc_AC, _asm_exc_MC, _asm_exc_XM, _asm_exc_NMI, _asm_exc_OVRFLW, _asm_exc_BOUNDS, _asm_exc_OPCODE, _asm_exc_DOUBLEF, _asm_exc_STACKF, _asm_exc_GP, _asm_exc_PF, _asm_irq_0, _asm_irq_1, _asm_irq_7, task_switch, _asm_syscall
 
 .macro  SAVE_REGS
     pushad
@@ -213,3 +213,17 @@ task_switch:
     iret
 .task_switch_resume:
     ret
+
+# void _asm_syscall(void)  --  int 0x80 entry
+#
+# Reached through a DPL3 trap gate, so IF is left as the caller had it (enabled).
+# We save the same frame the IRQ path uses and hand its address to
+# syscall_dispatch, which reads eax/ebx/ecx/edx and writes the result back into
+# the saved eax slot so popad returns it to the caller.
+_asm_syscall:
+    SAVE_REGS
+    push esp                # pointer to struct regs
+    call syscall_dispatch
+    add esp, 4              # drop the arg; keep the (possibly modified) frame
+    RESTORE_REGS
+    iret

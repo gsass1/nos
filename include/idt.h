@@ -23,4 +23,8 @@ struct idt_ptr
 void idt_init(void);
 void idt_install_handler(uint8_t num, uint32_t base);
 
+// Install a gate with an explicit selector and flags byte (e.g. a DPL3 trap
+// gate for syscalls). See idt_set_gate for the flags encoding.
+void idt_set_gate_user(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
+
 #endif

@@ -98,3 +98,8 @@ void idt_install_handler(uint8_t num, uint32_t base)
 {
     idt_set_gate(num, base, 0x8, 0x8E);
 }
+
+void idt_set_gate_user(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags)
+{
+    idt_set_gate(num, base, sel, flags);
+}

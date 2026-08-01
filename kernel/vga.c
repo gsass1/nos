@@ -70,9 +70,21 @@ void vga_putc(char c)
 		return;
 	}
 
+	if(c == '\b') {
+		// Move the cursor back one cell. Callers that want to erase send the
+		// classic "\b \b" sequence (back, space, back).
+		if(vga_col > 0) {
+			vga_col--;
+		} else if(vga_row > 0) {
+			vga_row--;
+			vga_col = VGA_WIDTH - 1;
+		}
+		vga_set_cursor(vga_col, vga_row);
+		return;
+	}
+
 	vga_putc_at(c, vga_current_color, vga_col, vga_row);
 
-cont:
 	if(vga_col++ >= VGA_WIDTH) {
         vga_col = 0;
 		if(vga_row++ >= VGA_HEIGHT) {

@@ -73,12 +73,16 @@ static uint32_t parse(void *ptr)
         header->tar_header = tar_header;
         addr += ((size / 512) + 1) * 512;
 
-        header->next = kmalloc(sizeof(struct tar_header_chain));
-        header->next->tar_header = 0;
-
         if(size % 512) {
             addr += 512;
         }
+
+        header->next = kmalloc(sizeof(struct tar_header_chain));
+        header->next->tar_header = 0;
+
+        // Advance to the freshly allocated node. Without this every file
+        // overwrote the first node, so only single-file initrds parsed right.
+        header = header->next;
     }
     mprintf(LOGLEVEL_DEBUG, "Done parsing tar file, files: %d\n", i);
     return i;

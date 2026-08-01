@@ -1,3 +1,4 @@
+#include <elf.h>
 #include <gdt.h>
 #include <idt.h>
 #include <initrd.h>
@@ -9,6 +10,7 @@
 #include <serial.h>
 #include <string.h>
 #include <sym.h>
+#include <syscall.h>
 #include <task.h>
 #include <va_list.h>
 #include <vsprintf.h>
@@ -47,119 +49,6 @@ struct multiboot *mbootptr;
 uint32_t initial_esp;
 
 extern uint32_t kernel_base, kernel_end;
-
-int shell_exec(const char *str)
-{
-	if(strcmp(str, "help") == 0) {
-		kprintf("help - Display this\n");
-		return 0;
-	} else if(strcmp(str, "ls") == 0) {
-			int i = 0;
-			struct dirent *node = 0;
-			while((node = vfs_readdir(fs_root, i)) != 0) {
-				kprintf("%s     ", node->name);
-				struct fs_node *fs_node = vfs_finddir(fs_root, node->name);
-				if((fs_node->flags & 0x7) == FS_DIRECTORY) {
-					kprintf("(directory)");
-				} else {
-					kprintf("(file)");
-				}
-				kprintf("\n");
-				i++;
-			}
-	} else if(strcmp(str, "cls") == 0) {
-		vga_clear();
-	} else {
-		kprintf("Unknown command\n");
-		return -1;
-	}
-}
-
-void shell(void)
-{
-
-    kprintf("Entering debug kernel shell\n");
-	char *buffer = kmalloc(256);
-
-loop:
-	memset(buffer, 0, 256);
-    kprintf("\nNOS: ");
-    int i = 0;
-	while(1) {
-        char c = kbd_getc();
-        if(c == 0) {
-            continue;
-        }
-
-		if(c == '\n') {
-			kprintf("\n");
-			shell_exec(buffer);
-			goto loop;
-		}
-
-		if(c == '\b') {
-			if(i > 0) {
-				buffer[--i] = 0;
-			}
-		}
-		
-		buffer[i++] = c;
-		buffer[i] = '\0';
-
-        kprintf("%c", c);
-    }
-}
-
-// --- Preemptive multitasking demo -----------------------------------------
-// Two worker tasks and the kernel task all busy-loop and print periodically.
-// None of them yields voluntarily, so any interleaving in the output is proof
-// that the PIT timer is preempting and round-robin scheduling all three.
-
-static volatile int demo_finished = 0;
-
-static void demo_delay(void)
-{
-    for(volatile uint32_t i = 0; i < 6000000; i++) {
-        /* burn a few timeslices between prints */
-    }
-}
-
-static void demo_task_a(void)
-{
-    for(int i = 0; i < 5; i++) {
-        kprintf("[A:%d] ", i);
-        demo_delay();
-    }
-    demo_finished++;
-    exit();
-}
-
-static void demo_task_b(void)
-{
-    for(int i = 0; i < 5; i++) {
-        kprintf("[B:%d] ", i);
-        demo_delay();
-    }
-    demo_finished++;
-    exit();
-}
-
-static void multitask_demo(void)
-{
-    kprintf("Multitasking demo (preemptive round-robin, no voluntary yields):\n");
-
-    spawn_task("demo_a", demo_task_a);
-    spawn_task("demo_b", demo_task_b);
-
-    // The kernel task keeps working too; the timer preempts it just like the
-    // workers. When both workers have exit()ed we fall through to the shell.
-    while(demo_finished < 2) {
-        kprintf("[K] ");
-        demo_delay();
-    }
-
-    kprintf("\nDemo done: both worker tasks exited cleanly.\n");
-}
 
 // Assembly code from boot.S jumps directly to here
 void kmain(struct multiboot *multiboot, uint32_t initial_stack)
@@ -207,6 +96,9 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	// Initialize symbol resolution
 	sym_init();
 
+	// Install the int 0x80 syscall gate userspace uses to call the kernel.
+	syscall_init();
+
 	// Initialize preemptive tasking. The kernel thread adopts the current
 	// stack; the PIT IRQ drives round-robin scheduling from here on.
 	tasking_init();
@@ -214,8 +106,16 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	// Hooray, we are booted.
     kprintf("Welcome to NOS!\n");
 
-	// Prove multitasking works before dropping into the shell.
-	multitask_demo();
+	// Load the shell from the initrd and run it as its own program. It talks to
+	// the kernel only through syscalls; it runs in ring 0 for now but will move
+	// to ring 3 unchanged once user mode lands.
+	if(elf_exec("sh") < 0) {
+		panic("Failed to load /sh from initrd\n");
+	}
 
-	shell();
+	// The kernel task's job is done. Idle so the timer keeps scheduling the
+	// shell (and anything it spawns); hlt parks the CPU until the next IRQ.
+	for(;;) {
+		asm volatile("hlt");
+	}
 }
