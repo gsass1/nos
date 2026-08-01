@@ -93,13 +93,35 @@ class Shell:
         return self.wait_for("nsh$", desc + " (prompt back)")
 
     def screen_rows(self):
-        """Dump VGA text memory via the monitor; returns the 25 visible rows."""
+        """Dump VGA text memory via the monitor; returns the 25 visible rows.
+
+        Reads the monitor's stdout incrementally rather than quitting QEMU to
+        collect it, so the call is retryable -- important when a busy guest
+        (e.g. an orphaned spin) makes monitor replies slow.
+        """
+        import select
+
+        fd = self.proc.stdout.fileno()
+        # Drain whatever monitor chatter is pending (prompts, sendkey echo).
+        while select.select([self.proc.stdout], [], [], 0)[0]:
+            if not os.read(fd, 65536):
+                break
+
         self.monitor("xp /4000bx 0xb8000")
-        time.sleep(1.0)
-        self.monitor("quit")
-        out, _ = self.proc.communicate(timeout=15)
+        buf = ""
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if select.select([self.proc.stdout], [], [], 0.2)[0]:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                buf += chunk.decode(errors="replace")
+            # 4000 dumped bytes -> 4000 0xNN tokens once complete.
+            if len(re.findall(r"0x[0-9a-f]{2}", buf)) >= 4000:
+                break
+
         cells = []
-        for line in out.splitlines():
+        for line in buf.splitlines():
             if ": 0x" not in line:
                 continue
             cells += [int(tok, 16) for tok in re.findall(r"0x[0-9a-f]{2}", line)]
@@ -381,6 +403,29 @@ def main():
             sh.monitor("sendkey ret")
             sh.wait_for("bye!", "terminal shell exited")
 
+            # Close the (now dead) terminal via its X: the clean path, no
+            # kill needed. Terminal is slot 2 at (220,184), 360 wide.
+            mouse_to(568, 196)
+            click()
+
+            # Second terminal (slot 2 reused, same geometry): run `spin`.
+            # The shell blocks in SYS_WAIT on a child that never exits, so
+            # closing this terminal exercises the SYS_KILL escalation.
+            mouse_to(30, 752)
+            click()
+            mouse_to(80, 672)
+            click()
+            sh.wait_for("nsh - NOS userspace shell", "second terminal banner")
+            for k in "spin":
+                sh.monitor("sendkey " + k)
+                time.sleep(0.15)
+            sh.monitor("sendkey ret")
+            sh.wait_for("spin: spinning", "spin runs inside the terminal")
+            time.sleep(0.5)
+            mouse_to(568, 196)
+            click()
+            sh.wait_for("wm: killed pid", "unresponsive shell was killed")
+
             sh.monitor("sendkey esc")
             sh.wait_for("wm: exit", "wm exits to shell")
             sh.wait_for("nsh$", "prompt after wm")
@@ -390,9 +435,17 @@ def main():
             failures.append("kernel panicked (see serial log)")
 
         # The prompt must be on the VISIBLE screen, not off in VGA memory.
-        rows = sh.screen_rows()
+        # Retried: a heavily loaded guest can lag the monitor's first reply.
+        rows = []
+        for _ in range(3):
+            rows = sh.screen_rows()
+            if any("nsh$" in row for row in rows):
+                break
+            time.sleep(1.0)
         if not any("nsh$" in row for row in rows):
-            failures.append("prompt not on the visible VGA screen (rows 0-24)")
+            seen = " | ".join(r.rstrip() for r in rows if r.strip())
+            failures.append(
+                f"prompt not on the visible VGA screen (rows 0-24); saw: {seen[:400]!r}")
     finally:
         sh.kill()
 

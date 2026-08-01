@@ -6,13 +6,25 @@
 
 struct fs_node;
 
-// One open file. node == 0 means the slot is free. Files come from the
-// (read-only) initrd, so there is nothing to release on close/reap beyond
-// clearing the slot.
+// What an fd refers to. Every task gets fds 0/1/2 (stdin/stdout/stderr) at
+// spawn -- either the real VGA console/keyboard or a console channel (a
+// terminal window) -- and children inherit them through exec, Unix-style.
+// fds 3+ are files opened from the initrd. FD_NONE (0) means the slot is
+// free; nothing needs releasing on close/reap beyond clearing the slot.
+enum fd_type
+{
+    FD_NONE = 0,
+    FD_CONSOLE, // VGA text output / PS/2 keyboard input
+    FD_CHANNEL, // console channel (see console.h)
+    FD_FILE,    // initrd file
+};
+
 struct file
 {
-    struct fs_node *node;
-    uint32_t offset;
+    int type;
+    struct fs_node *node; // FD_FILE
+    uint32_t offset;      // FD_FILE
+    int cid;              // FD_CHANNEL
 };
 
 #define TASK_MAX_FILES 8
@@ -38,10 +50,7 @@ struct task
     // Program break for SYS_SBRK: the user heap occupies [USER_HEAP_BASE, brk).
     // 0 for kernel threads (no user heap).
     uint32_t brk;
-    // Console channel this task's terminal I/O is routed through, or -1 for
-    // the real VGA/keyboard console. Children spawned via SYS_EXEC inherit it.
-    int console_id;
-    struct file files[TASK_MAX_FILES]; // fds 3.. index this as fd-3
+    struct file files[TASK_MAX_FILES]; // indexed directly by fd
     struct task *next;      // ready-queue link
     struct task *reap_next; // zombie-list link (used only after exit())
 };
@@ -51,10 +60,10 @@ void tasking_init(void);
 // Create a runnable task that begins executing at `entry` in address space
 // `dir` (pass 0 to share the current directory). If `user_esp` is non-zero the
 // task starts in ring 3 with that stack pointer; otherwise it is a ring 0
-// kernel thread. `console_id` routes the task's terminal I/O (-1 = the real
-// console).
+// kernel thread. `stdio` is an array of 3 file objects installed as the new
+// task's fds 0/1/2 (NULL = the real console/keyboard).
 int spawn_task(const char *name, void *entry, struct page_directory *dir,
-               uint32_t user_esp, int console_id);
+               uint32_t user_esp, const struct file *stdio);
 
 // Returns non-zero while a task with the given pid is still in the ready queue.
 int task_alive(int pid);
@@ -71,6 +80,11 @@ void exit(int code);
 
 // Exit status of a recently-died task, or 0 if unknown/forgotten.
 int task_exit_code(int pid);
+
+// Forcefully terminate another task: unlink it from the ready queue and hand
+// it to the reaper. Returns 0, or -1 if the pid isn't running (or is the
+// kernel task). Killing yourself is exit(-9).
+int task_kill(int pid);
 
 // The task currently running on the CPU (0 before tasking_init).
 struct task *task_current(void);

@@ -58,12 +58,16 @@ struct elf32_phdr
 #define EXEC_MAX_ARGS    16
 #define EXEC_ARG_BYTES   1024
 
+struct file;
+
 // Load an ELF32 program from the initrd, mapping its PT_LOAD segments, and
 // start it as a ring-3 task. `argv` is a NULL-terminated array of argument
 // strings in the CALLER's address space (or NULL for none); they are copied
 // onto the new process's stack so its _start receives (int argc, char **argv).
-// `console_id` routes the program's terminal I/O (-1 = the real console).
+// `stdio` is the fd 0/1/2 triple to install (NULL = the real console); pass
+// the parent's own files to inherit, Unix-style.
 // Returns the new task id, or -1 on failure.
-int elf_exec(const char *path, const char *const *argv, int console_id);
+int elf_exec(const char *path, const char *const *argv,
+             const struct file *stdio);
 
 #endif

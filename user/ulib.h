@@ -70,6 +70,7 @@ static inline int cread(int cid, void *buf, int len)  { return sys3(SYS_CREAD, c
 static inline int cwrite(int cid, const void *buf, int len) { return sys3(SYS_CWRITE, cid, (int)buf, len); }
 static inline int cstat(int cid)                      { return sys1(SYS_CSTAT, cid); }
 static inline int cclose(int cid)                     { return sys1(SYS_CCLOSE, cid); }
+static inline int kill(int pid)                       { return sys1(SYS_KILL, pid); }
 
 // Enters graphics mode; returns the mapped 32bpp framebuffer, or (void *)-1.
 static inline void *fbmap(void)

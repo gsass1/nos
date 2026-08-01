@@ -121,7 +121,7 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	// Load the shell from the initrd and run it as its own program. It talks to
 	// the kernel only through syscalls; it runs in ring 0 for now but will move
 	// to ring 3 unchanged once user mode lands.
-	if(elf_exec("sh", 0, -1) < 0) {
+	if(elf_exec("sh", 0, 0) < 0) {
 		panic("Failed to load /sh from initrd\n");
 	}
 

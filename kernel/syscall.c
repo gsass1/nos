@@ -34,46 +34,67 @@ static void console_write(const char *buf, uint32_t len)
     }
 }
 
+// The file object behind an fd of the calling task, or 0 if out of range.
+static struct file *fd_get(int fd)
+{
+    struct task *t = task_current();
+    if (!t || fd < 0 || fd >= TASK_MAX_FILES) {
+        return 0;
+    }
+    return &t->files[fd];
+}
+
 static int sys_write(int fd, const char *buf, uint32_t len)
 {
-    (void)fd; // fds 1 and 2 are both "the terminal" for now
-    if (!buf) {
+    struct file *f = fd_get(fd);
+    if (!f || !buf) {
         return -1;
     }
-    int cid = task_current() ? task_current()->console_id : -1;
-    if (cid >= 0) {
-        // Task lives in a terminal window: route output to its channel.
-        // Serial still sees everything, which keeps logs and tests whole.
-        console_out_write(cid, buf, len);
+    switch (f->type) {
+    case FD_CONSOLE:
+        console_write(buf, len);
+        return (int)len;
+    case FD_CHANNEL:
+        // Output for a terminal window: into the channel's ring. Serial
+        // still sees everything, which keeps logs and tests whole.
+        console_out_write(f->cid, buf, len);
         for (uint32_t i = 0; i < len; i++) {
             serial_write_c(buf[i]);
         }
         return (int)len;
+    default:
+        return -1; // initrd files are read-only; FD_NONE is nothing at all
     }
-    console_write(buf, len);
-    return (int)len;
 }
 
-// Block until a key (or terminal input byte) is available, yielding so other
-// tasks run while we wait. The keyboard IRQ fills kbd_getc's buffer; it works
-// here because the trap gate left interrupts enabled.
+// One byte from an interactive fd, or -1 if none is pending right now.
+static int fd_trygetc(struct file *f)
+{
+    if (f->type == FD_CONSOLE) {
+        char c = kbd_getc();
+        return c ? (unsigned char)c : -1;
+    }
+    if (f->type == FD_CHANNEL) {
+        return console_in_getc(f->cid);
+    }
+    return -1;
+}
+
+// Block until stdin has a byte, yielding so other tasks run while we wait.
+// (The keyboard IRQ keeps firing because the syscall trap gate left IF set.)
 static int sys_getc(void)
 {
-    int cid = task_current() ? task_current()->console_id : -1;
-    if (cid >= 0) {
-        for (;;) {
-            int c = console_in_getc(cid);
-            if (c >= 0) {
-                return c;
-            }
-            task_switch();
-        }
+    struct file *f = fd_get(0);
+    if (!f || (f->type != FD_CONSOLE && f->type != FD_CHANNEL)) {
+        return -1;
     }
-    char c;
-    while ((c = kbd_getc()) == 0) {
+    for (;;) {
+        int c = fd_trygetc(f);
+        if (c >= 0) {
+            return c;
+        }
         task_switch();
     }
-    return (unsigned char)c;
 }
 
 static int sys_readdir(uint32_t index, char *name_out, uint32_t len)
@@ -111,11 +132,12 @@ static int sys_open(const char *path)
         return -1;
     }
     struct task *t = task_current();
-    for (int i = 0; i < TASK_MAX_FILES; i++) {
-        if (!t->files[i].node) {
+    for (int i = 3; i < TASK_MAX_FILES; i++) { // 0-2 are stdio
+        if (t->files[i].type == FD_NONE) {
+            t->files[i].type = FD_FILE;
             t->files[i].node = node;
             t->files[i].offset = 0;
-            return i + 3; // fds 0-2 are the console
+            return i;
         }
     }
     return -1; // no free slot
@@ -123,36 +145,42 @@ static int sys_open(const char *path)
 
 static int sys_read(int fd, char *buf, uint32_t len)
 {
-    if (!buf) {
+    struct file *f = fd_get(fd);
+    if (!f || !buf) {
         return -1;
     }
-    if (fd == 0) {
-        // stdin: one blocking keypress at a time.
+    switch (f->type) {
+    case FD_CONSOLE:
+    case FD_CHANNEL: {
+        // Interactive: block for one byte at a time.
         if (len == 0) {
             return 0;
         }
-        buf[0] = (char)sys_getc();
+        int c;
+        while ((c = fd_trygetc(f)) < 0) {
+            task_switch();
+        }
+        buf[0] = (char)c;
         return 1;
     }
-    struct task *t = task_current();
-    int slot = fd - 3;
-    if (slot < 0 || slot >= TASK_MAX_FILES || !t->files[slot].node) {
+    case FD_FILE: {
+        uint32_t got = vfs_read(f->node, f->offset, len, (uint8_t *)buf);
+        f->offset += got;
+        return (int)got;
+    }
+    default:
         return -1;
     }
-    uint32_t got = vfs_read(t->files[slot].node, t->files[slot].offset, len,
-                            (uint8_t *)buf);
-    t->files[slot].offset += got;
-    return (int)got;
 }
 
 static int sys_close(int fd)
 {
-    struct task *t = task_current();
-    int slot = fd - 3;
-    if (slot < 0 || slot >= TASK_MAX_FILES || !t->files[slot].node) {
+    struct file *f = fd_get(fd);
+    if (!f || f->type == FD_NONE) {
         return -1;
     }
-    t->files[slot].node = 0;
+    f->type = FD_NONE;
+    f->node = 0;
     return 0;
 }
 
@@ -249,23 +277,33 @@ static int sys_mouse(struct mouse_state *out)
     return 0;
 }
 
-// Non-blocking keyboard read for GUI event loops: next key or -1.
+// Non-blocking stdin read for GUI event loops: next byte or -1.
 static int sys_pollc(void)
 {
-    char c = kbd_getc();
-    return c ? (unsigned char)c : -1;
+    struct file *f = fd_get(0);
+    if (!f) {
+        return -1;
+    }
+    return fd_trygetc(f);
 }
 
 // Spawn a program attached to a fresh console channel (see console.h): its
-// terminal I/O flows through rings the caller drains/feeds, instead of the
-// real screen and keyboard. Returns the console id.
+// stdio fds point at rings the caller drains/feeds, instead of the real
+// screen and keyboard. Returns the console id.
 static int sys_execc(const char *path, const char *const *argv)
 {
     int cid = console_alloc();
     if (cid < 0) {
         return -1;
     }
-    int pid = elf_exec(path, argv, cid);
+    struct file stdio[3];
+    for (int i = 0; i < 3; i++) {
+        stdio[i].type = FD_CHANNEL;
+        stdio[i].node = 0;
+        stdio[i].offset = 0;
+        stdio[i].cid = cid;
+    }
+    int pid = elf_exec(path, argv, stdio);
     if (pid < 0) {
         console_free(cid);
         return -1;
@@ -299,22 +337,24 @@ void syscall_dispatch(struct regs *r)
     case SYS_READDIR:
         r->eax = (uint32_t)sys_readdir(r->ebx, (char *)r->ecx, r->edx);
         break;
-    case SYS_CLEAR:
+    case SYS_CLEAR: {
         // In a terminal window, "clear" is a form feed the terminal renders;
         // only the real console clears the VGA text screen.
-        if (task_current() && task_current()->console_id >= 0) {
-            console_out_write(task_current()->console_id, "\f", 1);
+        struct file *out = fd_get(1);
+        if (out && out->type == FD_CHANNEL) {
+            console_out_write(out->cid, "\f", 1);
         } else {
             vga_clear();
         }
         r->eax = 0;
         break;
+    }
     case SYS_EXEC:
-        // Children inherit the parent's console, so programs a terminal's
+        // Children inherit the parent's stdio fds, so programs a terminal's
         // shell runs print into the same terminal window.
         r->eax = (uint32_t)elf_exec((const char *)r->ebx,
                                     (const char *const *)r->ecx,
-                                    task_current()->console_id);
+                                    task_current()->files);
         break;
     case SYS_WAIT:
         r->eax = (uint32_t)sys_wait((int)r->ebx);
@@ -365,12 +405,18 @@ void syscall_dispatch(struct regs *r)
     case SYS_CWRITE:
         r->eax = (uint32_t)console_in_write((int)r->ebx, (const char *)r->ecx, r->edx);
         break;
-    case SYS_CSTAT:
-        r->eax = (uint32_t)task_alive(console_pid((int)r->ebx));
+    case SYS_CSTAT: {
+        // The attached pid while it is alive, 0 once it has died.
+        int pid = console_pid((int)r->ebx);
+        r->eax = (uint32_t)(task_alive(pid) ? pid : 0);
         break;
+    }
     case SYS_CCLOSE:
         console_free((int)r->ebx);
         r->eax = 0;
+        break;
+    case SYS_KILL:
+        r->eax = (uint32_t)task_kill((int)r->ebx);
         break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);

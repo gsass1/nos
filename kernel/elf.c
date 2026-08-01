@@ -24,7 +24,8 @@ static int is_user_ptr(const void *p)
     return (uint32_t)p >= USER_VADDR_MIN && (uint32_t)p < USER_VADDR_MAX;
 }
 
-int elf_exec(const char *path, const char *const *argv, int console_id)
+int elf_exec(const char *path, const char *const *argv,
+             const struct file *stdio)
 {
     // Copy the path out of the caller's address space now: once we activate the
     // new page directory below, the caller's user memory is no longer mapped.
@@ -177,5 +178,5 @@ int elf_exec(const char *path, const char *const *argv, int console_id)
     kfree(buf);
 
     mprintf(LOGLEVEL_DEFAULT, "elf_exec: '%s' loaded, entry 0x%08x\n", kpath, entry);
-    return spawn_task(kpath, (void *)entry, dir, usp, console_id);
+    return spawn_task(kpath, (void *)entry, dir, usp, stdio);
 }

@@ -20,7 +20,7 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/fbtest initrd/mtest initrd/wm
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/fbtest initrd/mtest initrd/wm initrd/spin
 OBJ=boot/boot.o \
 drivers/keyboard.o \
 drivers/mouse.o \
@@ -170,11 +170,15 @@ initrd/wm: user/wm.c user/gfx.h user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/wm.c -o user/wm.o $(CFLAGS)
 	$(LD) -T user/user.ld user/wm.o -o initrd/wm
 
+initrd/spin: user/spin.c user/ulib.h user/user.ld include/syscall.h
+	$(CC) -c user/spin.c -o user/spin.o $(CFLAGS)
+	$(LD) -T user/user.ld user/spin.o -o initrd/spin
+
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat fbtest mtest wm
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat fbtest mtest wm spin
 
 initrd: $(INITRD)
 

@@ -76,8 +76,10 @@ void tasking_init(void)
     current_task->stack_mem = 0;
     current_task->kstack_top = 0; // pure ring0 task, esp0 never used
     current_task->brk = 0;
-    current_task->console_id = -1;
     memset((void *)current_task->files, 0, sizeof(current_task->files));
+    for (int i = 0; i < 3; i++) {
+        current_task->files[i].type = FD_CONSOLE;
+    }
     current_task->page_directory = current_directory;
     current_task->owns_dir = 0; // shares the boot address space; never reaped
     current_task->next = 0;
@@ -89,7 +91,7 @@ void tasking_init(void)
 }
 
 int spawn_task(const char *name, void *entry, struct page_directory *dir,
-               uint32_t user_esp, int console_id)
+               uint32_t user_esp, const struct file *stdio)
 {
     mprintf(LOGLEVEL_DEBUG, "Spawning task %s with entry: 0x%08x\n", name, entry);
 
@@ -111,8 +113,14 @@ int spawn_task(const char *name, void *entry, struct page_directory *dir,
     task->stack_mem = stack_mem;
     task->kstack_top = user_esp ? (uint32_t)(stack_mem + stack_size) : 0;
     task->brk = user_esp ? USER_HEAP_BASE : 0;
-    task->console_id = console_id;
     memset(task->files, 0, sizeof(task->files));
+    if (stdio) {
+        memcpy(task->files, stdio, 3 * sizeof(struct file));
+    } else {
+        for (int i = 0; i < 3; i++) {
+            task->files[i].type = FD_CONSOLE;
+        }
+    }
 
     uint32_t *sp = (uint32_t *)(stack_mem + stack_size);
 
@@ -230,6 +238,45 @@ int task_alive(int pid)
         }
         t = t->next;
     }
+    return 0;
+}
+
+int task_kill(int pid)
+{
+    asm volatile("cli");
+
+    if (current_task && current_task->id == pid) {
+        asm volatile("sti");
+        exit(-9); // never returns
+    }
+
+    // Find the victim in the ready queue. pid 0 is the kernel task: the head
+    // of the queue and not killable (also the panic guard in exit()).
+    struct task *prev = 0;
+    struct task *t = (struct task *)ready_queue;
+    while (t && t->id != pid) {
+        prev = t;
+        t = t->next;
+    }
+    if (!t || t == ready_queue) {
+        asm volatile("sti");
+        return -1;
+    }
+
+    // Same dance as exit(), but performed on the victim's behalf: unlink it
+    // (leaving t->next intact in case the scheduler is mid-walk) and hand it
+    // to the reaper. It is not running -- we are -- so its saved context just
+    // dies with its stack.
+    prev->next = t->next;
+
+    exit_records[exit_record_next].pid = t->id;
+    exit_records[exit_record_next].code = -9;
+    exit_record_next = (exit_record_next + 1) % EXIT_RECORDS;
+
+    t->reap_next = (struct task *)zombie_queue;
+    zombie_queue = t;
+
+    asm volatile("sti");
     return 0;
 }
 

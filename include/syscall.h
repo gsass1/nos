@@ -27,8 +27,9 @@
 #define SYS_EXECC   19  // execc(path, argv)           -> console id; program runs attached to it
 #define SYS_CREAD   20  // cread(cid, buf, len)        -> bytes drained from the console's output
 #define SYS_CWRITE  21  // cwrite(cid, buf, len)       -> bytes fed into the console's input
-#define SYS_CSTAT   22  // cstat(cid)                  -> 1 while the attached task lives, else 0
+#define SYS_CSTAT   22  // cstat(cid)                  -> attached pid while alive, else 0
 #define SYS_CCLOSE  23  // cclose(cid)                 -> 0; frees the console slot
+#define SYS_KILL    24  // kill(pid)                   -> 0, or -1 if no such running task
 
 // Returned by SYS_MOUSE: cursor position in framebuffer coordinates,
 // buttons bit0=left bit1=right bit2=middle.

@@ -342,15 +342,24 @@ static void spawn_terminal(void)
     w->term = 1;
 }
 
-// Ask the shell inside to exit (best effort), then drop the channel.
+// Ask the shell inside to exit; if it doesn't (e.g. it's blocked waiting on
+// some spinning child), kill it, then drop the channel.
 static void close_terminal(struct win *w)
 {
-    if (w->cid >= 0) {
-        cwrite(w->cid, "exit\n", 5);
-        sleep(50); // give it a beat to run the builtin
-        cclose(w->cid);
-        w->cid = -1;
+    if (w->cid < 0) {
+        return;
     }
+    cwrite(w->cid, "exit\n", 5);
+    sleep(80); // give it a beat to run the builtin
+    int pid = cstat(w->cid);
+    if (pid > 0) {
+        kill(pid);
+        put("wm: killed pid ");
+        puti(pid);
+        put("\n");
+    }
+    cclose(w->cid);
+    w->cid = -1;
 }
 
 static void spawn_about(void)
