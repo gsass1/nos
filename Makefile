@@ -56,25 +56,31 @@ kernel/vfs.o \
 kernel/vga.o \
 kernel/vsprintf.o
 
-# Vendored BearSSL (third_party/bearssl), built for userland against the
+# BearSSL (third_party/bearssl, git submodule), built for userland against the
 # freestanding shim libc in user/libc. The x86 SIMD implementations are
 # excluded -- their intrinsics headers require a hosted libc -- and disabled
 # through the BR_* macros so BearSSL's portable constant-time code is used.
 # -O2 matters: TLS handshakes do real bignum math on an emulated i386.
+# Objects go to build/bearssl so the submodule checkout stays clean.
 BEARSSL_DIR=third_party/bearssl
+ifeq ($(wildcard $(BEARSSL_DIR)/src),)
+$(error $(BEARSSL_DIR) is empty; run: git submodule update --init)
+endif
+BEARSSL_BUILD=build/bearssl
 BEARSSL_SRC=$(filter-out %/ghash_pclmul.c %/chacha20_sse2.c %/sysrng.c \
     $(wildcard $(BEARSSL_DIR)/src/symcipher/aes_x86ni*.c), \
     $(wildcard $(BEARSSL_DIR)/src/*.c $(BEARSSL_DIR)/src/*/*.c))
-BEARSSL_OBJ=$(BEARSSL_SRC:.c=.o)
+BEARSSL_OBJ=$(patsubst $(BEARSSL_DIR)/src/%.c,$(BEARSSL_BUILD)/%.o,$(BEARSSL_SRC))
 BEARSSL_CFLAGS=-I$(BEARSSL_DIR)/inc -I$(BEARSSL_DIR)/src -Iuser/libc \
     -std=gnu99 -ffreestanding -O2 -g \
     -DBR_AES_X86NI=0 -DBR_SSE2=0 -DBR_RDRAND=0
-BEARSSL_LIB=$(BEARSSL_DIR)/libbearssl.a
+BEARSSL_LIB=$(BEARSSL_BUILD)/libbearssl.a
 AR=$(TOOLPREFIX)ar
 
 all: $(BIN)
 
-$(BEARSSL_DIR)/src/%.o: $(BEARSSL_DIR)/src/%.c
+$(BEARSSL_BUILD)/%.o: $(BEARSSL_DIR)/src/%.c
+	@mkdir -p $(dir $@)
 	$(CC) -c $< -o $@ $(BEARSSL_CFLAGS)
 
 $(BEARSSL_LIB): $(BEARSSL_OBJ)
@@ -296,5 +302,5 @@ clean:
 	rm -f $(BIN)
 	rm -f $(ISO)
 	rm -f user/*.o user/libc/libc.o
-	rm -f $(BEARSSL_OBJ) $(BEARSSL_LIB)
+	rm -rf $(BEARSSL_BUILD)
 	rm -rf initrd

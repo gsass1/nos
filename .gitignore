@@ -28,3 +28,4 @@ tests/wm8.ppm
 
 iso/initrd.tar
 initrd/
+build/
