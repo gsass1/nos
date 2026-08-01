@@ -11,6 +11,7 @@
 //   with interrupts masked, so it must not block).
 // - A closed socket lingers in TS_LINGER to ACK the peer's FIN; the slot is
 //   reclaimed once teardown completes, or by age when tcp_connect needs it.
+#include <irq.h>
 #include <kernel.h>
 #include <net.h>
 #include <pit.h>
@@ -71,18 +72,6 @@ struct tcp_sock
 
 static struct tcp_sock socks[TCP_SOCKS];
 static uint8_t segbuf[sizeof(struct tcp_hdr) + 4 + TCP_MSS];
-
-static inline uint32_t irq_save(void)
-{
-    uint32_t flags;
-    asm volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
-    return flags;
-}
-
-static inline void irq_restore(uint32_t flags)
-{
-    asm volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
-}
 
 // a - b in sequence space; positive when a is later.
 static inline int32_t seq_diff(uint32_t a, uint32_t b)

@@ -1,3 +1,4 @@
+#include <irq.h>
 #include <kernel.h>
 #include <mm.h>
 #include <string.h>
@@ -23,19 +24,7 @@ uint32_t heap_end;
 
 // The heap walk mutates block headers non-atomically, and callers allocate
 // with interrupts enabled (e.g. elf_exec) while the scheduler can preempt into
-// another allocating/freeing task. Mask interrupts around every walk; single
-// CPU, so that is sufficient. IF is restored to exactly what the caller had.
-static inline uint32_t irq_save(void)
-{
-    uint32_t flags;
-    asm volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
-    return flags;
-}
-
-static inline void irq_restore(uint32_t flags)
-{
-    asm volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
-}
+// another allocating/freeing task. Mask interrupts (irq.h) around every walk.
 
 // `reserved_end` is the first byte past memory the heap must not touch --
 // in practice the end of the initrd module, which the bootloader places right

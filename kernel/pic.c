@@ -52,6 +52,9 @@ void pic_init(void)
 
 void pic_unmask(uint8_t irq)
 {
+    if (irq > 15) {
+        return; // not a legacy PIC line; don't wrap onto an unrelated one
+    }
     uint16_t port = irq < 8 ? PIC1_DATA : PIC2_DATA;
     uint8_t bit = irq & 7;
     outb(port, inb(port) & ~(1 << bit));

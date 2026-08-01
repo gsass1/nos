@@ -426,7 +426,8 @@ coexist because they're in separate page directories.
 The initrd (`kernel/initrd.c`) is a **ustar tar** passed as a Multiboot module.
 `initrd_init` parses the tar into a flat list of file nodes (plus a synthetic
 `dev` directory). Each file's `read` returns bytes straight out of the tar image
-in memory. The initrd currently holds `symtable`, `hello`, and `sh`.
+in memory. The initrd currently holds `symtable` plus the user programs listed in the
+Makefile's `USERPROGS` (`sh`, `hello`, `cat`, `wget`, ...).
 
 ---
 
@@ -453,10 +454,13 @@ filesystem; no raw disk interface is exposed to ring 3.
 
 **Networking** (`kernel/net.c`, `kernel/tcp.c`): a minimal IPv4 stack sized
 for QEMU's user-mode (slirp) topology -- static config `10.0.2.15/24`, every
-destination reached through the gateway MAC (`10.0.2.2`), DNS at `10.0.2.3`.
-All receive-side protocol processing (ethernet demux, ARP, IP, UDP/DNS
-matching, TCP input) runs in the NIC's IRQ handler with interrupts off;
-task-side senders share state with it under `irq_save`. TCP is client-only
+destination reached through the gateway IP (`10.0.2.2`, its MAC resolved once
+via ARP), DNS at `10.0.2.3`. All receive-side protocol processing (ethernet
+demux, ARP, IP, UDP/DNS matching, TCP input) runs in the NIC's IRQ handler
+with interrupts off; task-side senders update shared multi-word state only
+under `irq_save`, while blocking waits poll single-word completion flags
+(`gw_valid`, DNS done, TCP state) unmasked -- safe on a single CPU where the
+IRQ path is the only writer. TCP is client-only
 with stop-and-wait transmission, and every retransmission timer is a blocking
 task-context loop polling `timer_ticks` (the `sys_sleep` pattern) -- there are
 no timer callbacks. Sockets surface as refcounted `FD_SOCKET` fds created by
@@ -516,7 +520,7 @@ cryptographically strong.
 | `kernel/vfs.c`, `kernel/initrd.c` | VFS + initrd (tar) |
 | `kernel/vga.c`, `drivers/keyboard.c`, `drivers/serial.c` | Drivers |
 | `kernel/kernel.c` | `kprintf`/`mprintf`/`panic`, symbol table, stack traces |
-| `user/sh.c`, `user/hello.c`, `user/user.ld` | Userspace programs |
+| `user/sh.c`, `user/hello.c`, `user/wget.c`, `user/user.ld` | Userspace programs |
 | `include/*.h` | Public headers for each subsystem |
 
 ---

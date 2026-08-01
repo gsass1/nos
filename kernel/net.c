@@ -7,6 +7,7 @@
 // state with that IRQ path, so they mask interrupts around every touch (the
 // pipe.c discipline). Blocking waits (ARP, DNS) live in task-context loops
 // that poll under the PIT, the same pattern sys_sleep/sys_wait use.
+#include <irq.h>
 #include <kernel.h>
 #include <net.h>
 #include <pit.h>
@@ -66,18 +67,6 @@ static volatile int gw_valid;
 
 // Shared frame assembly buffer. Only ever touched with interrupts masked.
 static uint8_t txframe[1514];
-
-static inline uint32_t irq_save(void)
-{
-    uint32_t flags;
-    asm volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
-    return flags;
-}
-
-static inline void irq_restore(uint32_t flags)
-{
-    asm volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
-}
 
 int net_up(void)
 {
@@ -288,15 +277,19 @@ static void udp_input(const uint8_t *seg, uint32_t len)
     }
 }
 
+// Longest hostname we encode. The wire form needs one extra length byte plus
+// the root label, so the question buffer below must hold DNS_NAME_MAX + 2.
+#define DNS_NAME_MAX 128
+
 // Build and send one DNS A query for `name` from `sport`. UDP checksum 0
 // (legitimately "not computed" in IPv4; slirp accepts it).
 static int dns_send_query(const char *name, uint16_t id, uint16_t sport)
 {
-    uint8_t pkt[sizeof(struct udp_hdr) + 12 + 130 + 4];
+    uint8_t pkt[sizeof(struct udp_hdr) + 12 + DNS_NAME_MAX + 2 + 4];
     struct udp_hdr *udp = (struct udp_hdr *)pkt;
     uint8_t *q = pkt + sizeof(*udp);
     uint32_t nlen = strlen(name);
-    if (nlen == 0 || nlen > 128) {
+    if (nlen == 0 || nlen > DNS_NAME_MAX) {
         return -1;
     }
     q[0] = id >> 8;

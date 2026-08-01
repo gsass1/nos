@@ -9,6 +9,7 @@
 // buffer virtual addresses double as the physical addresses the chip needs.
 #include <idt.h>
 #include <io.h>
+#include <irq.h>
 #include <kernel.h>
 #include <mm.h>
 #include <net.h>
@@ -76,18 +77,8 @@ static int tx_next;
 static int tx_used[TX_SLOTS]; // slot has been handed to the chip at least once
 
 // Same discipline as pipe.c: tx state is shared between task context and the
-// RX IRQ (which transmits protocol replies), so mask interrupts around it.
-static inline uint32_t irq_save(void)
-{
-    uint32_t flags;
-    asm volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
-    return flags;
-}
-
-static inline void irq_restore(uint32_t flags)
-{
-    asm volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
-}
+// RX IRQ (which transmits protocol replies), so mask interrupts (irq.h)
+// around it.
 
 int rtl8139_present(void)
 {
@@ -101,7 +92,7 @@ const uint8_t *rtl8139_mac(void)
 
 int rtl8139_tx(const void *frame, uint32_t len)
 {
-    if (len > 1514) {
+    if (!nic_present || len > 1514) {
         return -1;
     }
     uint32_t flags = irq_save();
@@ -169,7 +160,9 @@ void rtl8139_irq(void)
     }
     uint16_t isr = inw(io_base + REG_ISR);
     outw(io_base + REG_ISR, isr); // write-1-to-clear
-    if (isr & (ISR_ROK | ISR_RXOVW | ISR_FOVW)) {
+    // RER too: an error frame can share the ring with good frames that would
+    // otherwise sit unserviced until the next ROK.
+    if (isr & (ISR_ROK | ISR_RER | ISR_RXOVW | ISR_FOVW)) {
         rx_drain();
     }
     // TOK/TER need no work: TX completion is observed via TSD_OWN in
@@ -189,6 +182,10 @@ int rtl8139_init(void)
 
     io_base = (uint16_t)(pci_config_read(bus, dev, 0, 0x10) & ~0x3U);
     uint8_t irq_line = (uint8_t)(pci_config_read(bus, dev, 0, 0x3C) & 0xFF);
+    if (irq_line > 15) { // 0xFF = no legacy line routed; >15 = not PIC-wired
+        mprintf(LOGLEVEL_DEFAULT, "bad irq line %d, disabling nic\n", irq_line);
+        return -1;
+    }
 
     outb(io_base + REG_CONFIG1, 0x00); // power on
     outb(io_base + REG_CR, CR_RST);
@@ -208,6 +205,9 @@ int rtl8139_init(void)
 
     outw(io_base + REG_IMR, ISR_ROK | ISR_RER | ISR_TOK | ISR_TER |
                             ISR_RXOVW | ISR_FOVW);
+    // RE/TE must be set before the RCR/TCR writes: the chip ignores config
+    // writes while the engines are disabled (datasheet; same order as Linux's
+    // 8139too). Nothing arrives in the gap -- the IRQ line is still masked.
     outb(io_base + REG_CR, CR_RE | CR_TE);
     outl(io_base + REG_RCR, RCR_CONFIG);
     outl(io_base + REG_TCR, TCR_CONFIG);

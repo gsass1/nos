@@ -1,3 +1,4 @@
+#include <irq.h>
 #include <pipe.h>
 #include <kernel.h>
 #include <task.h>
@@ -14,19 +15,8 @@ struct pipe
 };
 
 // Same discipline as console.c: the two ends run in different tasks, so mask
-// interrupts around ring/refcount updates so an ill-timed preemption can't
-// tear them.
-static inline uint32_t irq_save(void)
-{
-    uint32_t flags;
-    asm volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
-    return flags;
-}
-
-static inline void irq_restore(uint32_t flags)
-{
-    asm volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
-}
+// interrupts (irq.h) around ring/refcount updates so an ill-timed preemption
+// can't tear them.
 
 struct pipe *pipe_create(void)
 {

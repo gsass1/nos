@@ -172,13 +172,18 @@ def main():
             "wget through a pipeline",
         )
 
-        # A second connection reuses socket resources (the first one's slot
-        # must have been reclaimed after teardown).
-        sh.run(
-            "wget 10.0.2.100 /again",
-            ["HTTP/1.0 200 OK", "NOS-NET-TEST-BODY-END"],
-            "second connection",
-        )
+        # More sequential connections than TCP_SOCKS (4): every teardown must
+        # reclaim its slot or a later connect runs out and wget reports
+        # "connect failed". (Sequential runs are slower than the 2s linger,
+        # so this exercises clean teardown, not the age-based fallback.)
+        for i in range(4):
+            sh.run(
+                "wget 10.0.2.100 /again",
+                ["HTTP/1.0 200 OK", "NOS-NET-TEST-BODY-END"],
+                f"reconnect {i + 1}",
+            )
+        if "wget: connect failed" in sh.serial():
+            failures.append("a socket slot was not reclaimed after teardown")
 
         # HTTPS against the trusted stub: full TLS 1.2 handshake in BearSSL,
         # certificate chain verified against the embedded NOS Test CA using

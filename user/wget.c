@@ -294,7 +294,12 @@ void _start(int argc, char **argv)
     const char *parts[] = { "GET ", path, " HTTP/1.0\r\nHost: ", host,
                             "\r\nConnection: close\r\n\r\n" };
     for (int i = 0; i < 5; i++) {
-        for (const char *p = parts[i]; *p && n < (int)sizeof(req); p++) {
+        for (const char *p = parts[i]; *p; p++) {
+            if (n == (int)sizeof(req)) { // never send a truncated request
+                put("wget: url too long\n");
+                close(fd);
+                exit(1);
+            }
             req[n++] = *p;
         }
     }
