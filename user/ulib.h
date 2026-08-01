@@ -59,6 +59,7 @@ static inline int sleep(int ms)               { return sys1(SYS_SLEEP, ms); }
 static inline int mouse(struct mouse_state *m){ return sys1(SYS_MOUSE, (int)m); }
 static inline int pollc(void)                 { return sys0(SYS_POLLC); }
 static inline int getfont(void *buf8192)      { return sys1(SYS_FONT, (int)buf8192); }
+static inline int uptime_ms(void)             { return sys0(SYS_UPTIME); }
 
 // Enters graphics mode; returns the mapped 32bpp framebuffer, or (void *)-1.
 static inline void *fbmap(void)

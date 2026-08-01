@@ -23,6 +23,7 @@
 #define SYS_MOUSE   15  // mouse(struct mouse_state *out) -> 0, or -1
 #define SYS_POLLC   16  // pollc(void)                 -> key, or -1 if none pending
 #define SYS_FONT    17  // font(uint8_t buf[8192])     -> 0; the BIOS 8x16 font, 32 bytes/glyph
+#define SYS_UPTIME  18  // uptime(void)                -> milliseconds since boot
 
 // Returned by SYS_MOUSE: cursor position in framebuffer coordinates,
 // buttons bit0=left bit1=right bit2=middle.

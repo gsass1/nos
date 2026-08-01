@@ -304,6 +304,9 @@ void syscall_dispatch(struct regs *r)
     case SYS_FONT:
         r->eax = (uint32_t)sys_font((uint8_t *)r->ebx);
         break;
+    case SYS_UPTIME:
+        r->eax = timer_ticks * (1000 / PIT_HZ);
+        break;
     default:
         mprintf(LOGLEVEL_DEBUG, "Unknown syscall %d\n", r->eax);
         r->eax = (uint32_t)-1;

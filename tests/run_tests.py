@@ -267,19 +267,35 @@ def main():
             sh.wait_for("fbtest: done", "fbtest back to text mode")
             sh.wait_for("nsh$", "prompt after fbtest")
 
-        # Window manager: desktop + taskbar render, and dragging a window by
-        # its title bar moves it. Initial layout: win1 (140,120,400x300)
-        # unfocused (gray title), win2 (420,260,360x240) focused (navy title).
+        # Window manager: a full scripted desktop session. Initial layout:
+        # win1 "welcome" (140,120,400x300) unfocused (gray title), win2
+        # "notes" (420,260,360x240) focused (navy title). The cursor position
+        # is tracked in `cur` after one corner-clamp reset, giving absolute
+        # positioning for every subsequent click.
         sh.type_line("wm")
         if sh.wait_for("wm: started", "wm start"):
             time.sleep(1.0)
-            wm1 = os.path.join(REPO, "tests", "wm1.ppm")
-            for f in (wm1,):
-                if os.path.exists(f):
-                    os.remove(f)
-            sh.monitor("screendump " + wm1)
-            time.sleep(1.5)
-            sample(wm1, [
+            cur = [0, 0]
+
+            def mouse_to(x, y):
+                mouse_step(sh, x - cur[0], y - cur[1])
+                cur[0], cur[1] = x, y
+
+            def click():
+                sh.monitor("mouse_button 1")
+                time.sleep(0.4)
+                sh.monitor("mouse_button 0")
+                time.sleep(0.4)
+
+            def dump(name, checks, desc):
+                path = os.path.join(REPO, "tests", name)
+                if os.path.exists(path):
+                    os.remove(path)
+                sh.monitor("screendump " + path)
+                time.sleep(1.5)
+                sample(path, checks, desc)
+
+            dump("wm1.ppm", [
                 (8, 8, (0, 128, 128), "desktop"),
                 (512, 760, (192, 192, 192), "taskbar"),
                 (340, 132, (128, 128, 128), "win1 title (unfocused)"),
@@ -287,25 +303,60 @@ def main():
                 (600, 272, (0, 0, 128), "win2 title (focused)"),
             ], "wm initial")
 
-            # Drag win2's title bar (grab at 600,272) by +120,+60.
             mouse_reset(sh)
-            mouse_step(sh, 600, 272)
+
+            # Drag win2 by its title bar from (600,272) by +120,+60.
+            mouse_to(600, 272)
             sh.monitor("mouse_button 1")
             time.sleep(0.4)
-            mouse_step(sh, 120, 60)
+            mouse_to(720, 332)
             sh.monitor("mouse_button 0")
-            time.sleep(0.8)
-            wm2 = os.path.join(REPO, "tests", "wm2.ppm")
-            if os.path.exists(wm2):
-                os.remove(wm2)
-            sh.monitor("screendump " + wm2)
-            time.sleep(1.5)
-            sample(wm2, [
+            time.sleep(0.6)
+            dump("wm2.ppm", [
                 (700, 330, (0, 0, 128), "win2 title after drag"),
                 (600, 272, (0, 128, 128), "desktop where win2 was"),
             ], "wm after drag")
 
-            sh.monitor("sendkey q")
+            # Close win2 via its X button (win2 now at 540,320, 360 wide:
+            # close box center is x+w-21+9, y+3+9). Focus falls to win1.
+            mouse_to(888, 332)
+            click()
+            dump("wm3.ppm", [
+                (700, 330, (0, 128, 128), "desktop after close"),
+                (340, 132, (0, 0, 128), "win1 title focused after close"),
+            ], "wm close button")
+
+            # Start menu opens above the taskbar; "new window" spawns into
+            # slot 1 (freed by the close) at (180,152), 360x240, focused.
+            mouse_to(30, 752)
+            click()
+            dump("wm4.ppm", [
+                (20, 716, (232, 232, 232), "start menu open"),
+            ], "wm start menu")
+            mouse_to(80, 696)
+            click()
+            dump("wm5.ppm", [
+                (280, 164, (0, 0, 128), "new window title (focused)"),
+                (340, 132, (128, 128, 128), "win1 title unfocused again"),
+            ], "wm new window")
+
+            # Minimize the new window via its _ button (box center
+            # x+w-2*18-5+9, y+3+9 = 508,164); (280,164) then shows win1 body.
+            mouse_to(508, 164)
+            click()
+            dump("wm6.ppm", [
+                (280, 164, (255, 255, 255), "win1 body where minimized win was"),
+                (340, 132, (0, 0, 128), "win1 focused after minimize"),
+            ], "wm minimize")
+
+            # Restore it from its taskbar entry (second entry: 232..384).
+            mouse_to(300, 752)
+            click()
+            dump("wm7.ppm", [
+                (280, 164, (0, 0, 128), "restored window title focused"),
+            ], "wm restore from taskbar")
+
+            sh.monitor("sendkey esc")
             sh.wait_for("wm: exit", "wm exits to shell")
             sh.wait_for("nsh$", "prompt after wm")
 
