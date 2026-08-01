@@ -156,7 +156,12 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	sym_init();
 
 	// Initialize tasking
-	tasking_init();
+	// Disabled: move_stack() relocates the stack via a captured esp/ebp that
+	// modern GCC invalidates around the intervening memcpy call, so it returns
+	// to a garbage address and faults. Tasking is currently unused (shell runs
+	// directly below, no tasks are spawned), so this is safe to skip until
+	// move_stack is rewritten in assembly.
+	// tasking_init();
 
 	// Hooray, we are booted.
     kprintf("Welcome to NOS!\n");

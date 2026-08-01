@@ -1,7 +1,7 @@
 AS=i686-elf-as
 AFLAGS=-g
 CC=i686-elf-gcc
-CFLAGS=-I./include/ -std=gnu99 -ffreestanding -nostdlib -g -Wall -Wextra
+CFLAGS=-I./include/ -std=gnu99 -ffreestanding -nostdlib -g -Wall -Wextra -fpermissive
 LFLAGS=-lgcc
 BIN=kernel.elf
 ISO=gianos.iso
@@ -101,6 +101,11 @@ iso: $(BIN)
 	cp symtable iso
 	rm -f symtable
 	mkisofs -R -b boot/grub/stage2_eltorito -no-emul-boot -boot-load-size 4 -boot-info-table -o $(ISO) iso
+
+# Boot the multiboot kernel directly in QEMU with the initrd as a module
+# (no GRUB/ISO needed). Serial (com1) is routed to stdio; Ctrl-A X quits.
+run: $(BIN)
+	qemu-system-i386 -kernel $(BIN) -initrd initrd/initrd.tar -serial stdio
 
 clean:
 	rm -f $(OBJ)

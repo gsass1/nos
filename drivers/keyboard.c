@@ -124,7 +124,7 @@ void kbd_init(void)
     keycache = kmalloc(256);
     memset(keycache, 0, 256);
 
-    outb(0x64, 0xF4);
+    outb(0x60, 0xF4);  // Enable scanning (keyboard command via data port 0x60)
 }
 
 char kbd_getc(void)
