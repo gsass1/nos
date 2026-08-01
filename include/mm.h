@@ -42,6 +42,18 @@ void switch_page_directory(struct page_directory *new);
 
 struct page *get_page(uint32_t addr, int make, struct page_directory *dir);
 
+// Validate a user-supplied pointer before the kernel touches it: nonzero iff
+// [p, p+len) lies inside the user window and every page is present and
+// user-accessible (and writable, when write is set) in the current address
+// space. After a successful check the kernel may use the range in place --
+// nothing ever unmaps a live task's user pages while that task is executing
+// a syscall (sbrk only adds; exit/reap only run once the task is done).
+int user_ok(const void *p, uint32_t len, int write);
+
+// Same for a NUL-terminated user string of at most max bytes including the
+// NUL: nonzero iff every byte up to and including the NUL is user-readable.
+int user_str_ok(const char *s, uint32_t max);
+
 struct page_table *clone_table(struct page_table *src, uint32_t *phys_addr);
 
 struct page_directory *clone_directory(struct page_directory *src);

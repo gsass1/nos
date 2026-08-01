@@ -15,30 +15,29 @@ static int elf_is_valid(struct elf32_ehdr *eh)
            eh->e_ident[2] == 'L'  && eh->e_ident[3] == 'F';
 }
 
-// True if p can be a pointer into the calling process's user memory. Kernel
-// callers (kmain) pass argv = NULL, so argv entries must always be user
-// pointers; rejecting everything else keeps a bogus argv array from making
-// the kernel dereference wild addresses on the caller's behalf.
-static int is_user_ptr(const void *p)
-{
-    return (uint32_t)p >= USER_VADDR_MIN && (uint32_t)p < USER_VADDR_MAX;
-}
-
 int elf_exec(const char *path, const char *const *argv,
              const struct file *stdio)
 {
-    // Copy the path out of the caller's address space now: once we activate the
-    // new page directory below, the caller's user memory is no longer mapped.
+    // Copy the path out of the caller's address space now: once we activate
+    // the new page directory below, the caller's user memory is no longer
+    // mapped. `path` is either a kernel string (kmain boot) or a user string
+    // the syscall layer already ran through user_path_ok.
     char kpath[128];
     strncpy(kpath, path, sizeof(kpath) - 1);
     kpath[sizeof(kpath) - 1] = '\0';
 
-    // Same for the argument strings. kargv[] points into argbuf.
+    // Same for the argument strings; kargv[] points into argbuf. Kernel
+    // callers (kmain) pass argv = NULL, so argv always comes from user space
+    // and every pointer slot and string must be validated as mapped user
+    // memory before being dereferenced -- collection just stops at the first
+    // entry that isn't (NULL terminator included).
     char argbuf[EXEC_ARG_BYTES];
     const char *kargv[EXEC_MAX_ARGS];
     uint32_t argc = 0, argused = 0;
-    if (argv && is_user_ptr(argv)) {
-        while (argc < EXEC_MAX_ARGS && is_user_ptr(argv[argc])) {
+    if (argv) {
+        while (argc < EXEC_MAX_ARGS &&
+               user_ok(&argv[argc], sizeof(*argv), 0) &&
+               user_str_ok(argv[argc], sizeof(argbuf))) {
             uint32_t len = strlen(argv[argc]) + 1;
             if (argused + len > sizeof(argbuf)) {
                 break;

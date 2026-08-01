@@ -1,4 +1,5 @@
 #include <debug.h>
+#include <elf.h> // USER_VADDR_MIN/MAX, for user pointer validation
 #include <kernel.h>
 #include <mm.h>
 #include <string.h>
@@ -248,4 +249,44 @@ struct page_table *clone_table(struct page_table *src, uint32_t *phys_addr)
         copy_page_physical(src->pages[i].frame * 0x1000, table->pages[i].frame * 0x1000);
     }
     return table;
+}
+
+int user_ok(const void *p, uint32_t len, int write)
+{
+    uint32_t start = (uint32_t)p;
+    if (start < USER_VADDR_MIN || start >= USER_VADDR_MAX ||
+        len > USER_VADDR_MAX - start) {
+        return 0;
+    }
+    for (uint32_t a = start & ~0xFFFU; a < start + len; a += 0x1000) {
+        struct page *pg = get_page(a, 0, current_directory);
+        if (!pg || !pg->present || !pg->user || (write && !pg->rw)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int user_str_ok(const char *s, uint32_t max)
+{
+    uint32_t a = (uint32_t)s;
+    while (max) {
+        // Validate at most up to the next page boundary, then scan it: the
+        // string may legitimately end before an unmapped following page.
+        uint32_t chunk = 0x1000 - (a & 0xFFFU);
+        if (chunk > max) {
+            chunk = max;
+        }
+        if (!user_ok((const void *)a, chunk, 0)) {
+            return 0;
+        }
+        for (uint32_t i = 0; i < chunk; i++) {
+            if (((const char *)a)[i] == '\0') {
+                return 1;
+            }
+        }
+        a += chunk;
+        max -= chunk;
+    }
+    return 0; // no NUL within max bytes
 }

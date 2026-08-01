@@ -35,6 +35,14 @@ static void console_write(const char *buf, uint32_t len)
     }
 }
 
+// A user-supplied path must be a readable NUL-terminated user string. 128
+// matches the kpath buffer in elf_exec; longer strings could not name an
+// initrd file anyway.
+static int user_path_ok(const char *path)
+{
+    return path && user_str_ok(path, 128);
+}
+
 // The file object behind an fd of the calling task, or 0 if out of range.
 static struct file *fd_get(int fd)
 {
@@ -48,7 +56,7 @@ static struct file *fd_get(int fd)
 static int sys_write(int fd, const char *buf, uint32_t len)
 {
     struct file *f = fd_get(fd);
-    if (!f || !buf) {
+    if (!f || !user_ok(buf, len, 0)) {
         return -1;
     }
     switch (f->type) {
@@ -104,7 +112,7 @@ static int sys_getc(void)
 
 static int sys_readdir(uint32_t index, char *name_out, uint32_t len)
 {
-    if (!name_out || len == 0) {
+    if (len == 0 || !user_ok(name_out, len, 1)) {
         return -1;
     }
     struct dirent *node = vfs_readdir(fs_root, index);
@@ -129,7 +137,7 @@ static int sys_wait(int pid)
 
 static int sys_open(const char *path)
 {
-    if (!path) {
+    if (!user_path_ok(path)) {
         return -1;
     }
     struct fs_node *node = vfs_finddir(fs_root, (char *)path);
@@ -151,7 +159,7 @@ static int sys_open(const char *path)
 static int sys_read(int fd, char *buf, uint32_t len)
 {
     struct file *f = fd_get(fd);
-    if (!f || !buf) {
+    if (!f || !user_ok(buf, len, 1)) {
         return -1;
     }
     switch (f->type) {
@@ -194,7 +202,7 @@ static int sys_close(int fd)
 // fds[1] writes. The ends flow into children via exec2/inheritance.
 static int sys_pipe(int *fds)
 {
-    if (!fds) {
+    if (!user_ok(fds, 2 * sizeof(int), 1)) {
         return -1;
     }
     struct task *t = task_current();
@@ -228,6 +236,9 @@ static int sys_pipe(int *fds)
 // so a failed exec leaves nothing to undo.
 static int sys_exec2(const char *path, const char *const *argv, const int *fds)
 {
+    if (!user_path_ok(path) || (fds && !user_ok(fds, 3 * sizeof(int), 0))) {
+        return -1;
+    }
     struct task *t = task_current();
     struct file stdio[3];
     for (int i = 0; i < 3; i++) {
@@ -276,7 +287,7 @@ static int sys_sbrk(int incr)
 
 static int sys_fbinfo(struct fb_info *out)
 {
-    if (!out || !fb_present()) {
+    if (!user_ok(out, sizeof(*out), 1) || !fb_present()) {
         return -1;
     }
     out->width = FB_WIDTH;
@@ -331,7 +342,7 @@ static int sys_sleep(uint32_t ms)
 
 static int sys_mouse(struct mouse_state *out)
 {
-    if (!out) {
+    if (!user_ok(out, sizeof(*out), 1)) {
         return -1;
     }
     mouse_state(&out->x, &out->y, &out->buttons);
@@ -353,6 +364,9 @@ static int sys_pollc(void)
 // screen and keyboard. Returns the console id.
 static int sys_execc(const char *path, const char *const *argv)
 {
+    if (!user_path_ok(path)) {
+        return -1;
+    }
     int cid = console_alloc();
     if (cid < 0) {
         return -1;
@@ -376,7 +390,7 @@ static int sys_execc(const char *path, const char *const *argv)
 static int sys_font(uint8_t *buf)
 {
     const uint8_t *font = fb_font_data();
-    if (!buf || !font) {
+    if (!user_ok(buf, FB_FONT_BYTES, 1) || !font) {
         return -1;
     }
     memcpy(buf, font, FB_FONT_BYTES);
@@ -413,9 +427,11 @@ void syscall_dispatch(struct regs *r)
     case SYS_EXEC:
         // Children inherit the parent's stdio fds, so programs a terminal's
         // shell runs print into the same terminal window.
-        r->eax = (uint32_t)elf_exec((const char *)r->ebx,
-                                    (const char *const *)r->ecx,
-                                    task_current()->files);
+        r->eax = user_path_ok((const char *)r->ebx)
+                     ? (uint32_t)elf_exec((const char *)r->ebx,
+                                          (const char *const *)r->ecx,
+                                          task_current()->files)
+                     : (uint32_t)-1;
         break;
     case SYS_WAIT:
         r->eax = (uint32_t)sys_wait((int)r->ebx);
@@ -461,10 +477,14 @@ void syscall_dispatch(struct regs *r)
                                      (const char *const *)r->ecx);
         break;
     case SYS_CREAD:
-        r->eax = (uint32_t)console_out_read((int)r->ebx, (char *)r->ecx, r->edx);
+        r->eax = user_ok((void *)r->ecx, r->edx, 1)
+                     ? (uint32_t)console_out_read((int)r->ebx, (char *)r->ecx, r->edx)
+                     : (uint32_t)-1;
         break;
     case SYS_CWRITE:
-        r->eax = (uint32_t)console_in_write((int)r->ebx, (const char *)r->ecx, r->edx);
+        r->eax = user_ok((const void *)r->ecx, r->edx, 0)
+                     ? (uint32_t)console_in_write((int)r->ebx, (const char *)r->ecx, r->edx)
+                     : (uint32_t)-1;
         break;
     case SYS_CSTAT: {
         // The attached pid while it is alive, 0 once it has died.

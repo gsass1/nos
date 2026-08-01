@@ -74,8 +74,11 @@ qemu-system-i386 -kernel kernel.elf -initrd initrd/initrd.tar \
 - The heap is a fixed 2.4MB with no split/coalesce; it starts after the initrd module
   (`heap_init(initrd_end)`), never assume a fixed gap after `kernel_end`.
 - `kmalloc`/`kfree` mask interrupts internally; the scheduler can preempt anywhere else.
-- User pointers passed to syscalls are only range-checked for exec argv; a bad pointer
-  elsewhere still page-faults in ring 0 and panics (copy_from_user is future work).
+- Every syscall validates user pointers via `user_ok`/`user_str_ok` (paging.c): inside
+  the user window, mapped, user bit set (+writable when the kernel writes there). After
+  a successful check buffers are used in place -- nothing unmaps a live task's user
+  pages mid-syscall. A new syscall that takes a pointer MUST guard it the same way;
+  `badptr` is the regression test.
 - Faults from ring 3 kill the task (`exit(-1)`); faults from ring 0 panic. If a "hang"
   is reported, check whether the shell still answers on serial before assuming a lock.
 - `wait` returns the child's exit status from a 32-entry ring buffer; statuses of

@@ -289,6 +289,11 @@ def main():
         )
         sh.run("hello", ["Hello from a loaded ELF program"], "shell alive after crash")
 
+        # Hostile user pointers: every syscall must reject unmapped, kernel,
+        # and out-of-window pointers with -1 instead of faulting in ring 0
+        # (a panic) or reading/writing kernel memory on the caller's behalf.
+        sh.run("badptr", ["badptr: all hostile pointers rejected"], "hostile pointers")
+
         # Framebuffer: fbtest switches to 1024x768x32 graphics, draws four
         # colored quadrants and holds them; screendump the emulated display
         # and check actual pixel colors, then confirm text mode comes back.
@@ -473,7 +478,8 @@ def main():
             print("  - " + f)
         return 1
     print("PASS (boot, ls, exec/wait, argv, file io, sbrk, pipes, redirects, "
-          "error paths, fault isolation, shift keys, mouse, framebuffer, vga screen)")
+          "error paths, fault isolation, hostile pointers, shift keys, mouse, "
+          "framebuffer, vga screen)")
     return 0
 
 
