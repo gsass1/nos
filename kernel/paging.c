@@ -39,14 +39,6 @@ static void clear_frame(uint32_t frame_addr)
     frames[idx] &= ~(0x1 << off);
 }
 
-static uint32_t test_frame(uint32_t frame_addr)
-{
-    uint32_t frame = frame_addr / 0x1000;
-    uint32_t idx = INDEX_FROM_BIT(frame);
-    uint32_t off = OFFSET_FROM_BIT(frame);
-    return (frames[idx] & (0x1 << off));
-}
-
 static uint32_t first_frame(void)
 {
     uint32_t i, j;
@@ -88,20 +80,49 @@ void free_frame(struct page *page)
     if(!(frame = page->frame)) {
         return;
     } else {
-        clear_frame(frame);
+        // clear_frame expects a physical address, not a frame index.
+        clear_frame(frame * 0x1000);
         page->frame = 0x0;
+        page->present = 0;
     }
 }
 
-void mm_paging_init(void)
+// Free an address space created by clone_directory(): release the frames and
+// page tables it owns, but leave the tables it shares with the kernel directory
+// alone. The directory must not be the active cr3 when this is called.
+void free_directory(struct page_directory *dir)
 {
-    mprintf(LOGLEVEL_DEFAULT, "Initializing Paging\n");
+    if(!dir) {
+        return;
+    }
 
-    // The size of physical memory. For the moment we
-    // assume it is 16MB big.
-    uint32_t mem_end_page = 0x1000000;
+    for(int i = 0; i < 1024; i++) {
+        if(!dir->tables[i]) {
+            continue;
+        }
+        // Shared kernel table: not ours to free.
+        if(kernel_directory->tables[i] == dir->tables[i]) {
+            continue;
+        }
 
-    nframes = mem_end_page / 0x1000;
+        struct page_table *table = dir->tables[i];
+        for(int j = 0; j < 1024; j++) {
+            if(table->pages[j].frame) {
+                free_frame(&table->pages[j]);
+            }
+        }
+        kfree(table);
+    }
+
+    kfree(dir);
+}
+
+void mm_paging_init(uint32_t mem_size)
+{
+    mprintf(LOGLEVEL_DEFAULT, "Initializing Paging (%d MB physical)\n",
+            mem_size / (1024 * 1024));
+
+    nframes = mem_size / 0x1000;
 
     // The bitset needs one bit per frame. INDEX_FROM_BIT(nframes) is the number
     // of uint32_t words, so the byte size we must hand kmalloc is that count

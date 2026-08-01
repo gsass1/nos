@@ -1,4 +1,4 @@
-.global copy_page_physical, read_eip
+.global copy_page_physical
 
 .intel_syntax noprefix
 
@@ -32,7 +32,3 @@ copy_page_physical:
    popf                  #; Pop EFLAGS back.
    pop ebx               #; Get the original value of EBX back.
    ret
-
-read_eip:
-   pop eax
-   jmp eax

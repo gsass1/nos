@@ -12,6 +12,11 @@ MODULE("TASK");
 volatile struct task *current_task;
 volatile struct task *ready_queue;
 
+// Tasks that have exit()ed but whose resources (stack, page directory, struct)
+// haven't been freed yet. They can't free themselves while running on their own
+// stack, so reap_tasks() (called from the idle loop) does it later.
+static volatile struct task *zombie_queue;
+
 static uint32_t next_pid = 0;
 
 // Selects the next task to run. Called from assembly (both the timer IRQ and
@@ -55,6 +60,7 @@ void tasking_init(void)
     current_task->esp = 0;
     current_task->stack_mem = 0;
     current_task->page_directory = current_directory;
+    current_task->owns_dir = 0; // shares the boot address space; never reaped
     current_task->next = 0;
     strcpy((char *)current_task->name, "kernel_task");
 
@@ -72,6 +78,8 @@ int spawn_task(const char *name, void *entry, struct page_directory *dir)
     struct task *task = kmalloc(sizeof(struct task));
     task->id = next_pid++;
     task->page_directory = dir ? dir : current_directory;
+    // We own (and must free on reap) any directory that isn't the shared one.
+    task->owns_dir = (dir && dir != current_directory);
     task->next = 0;
     strcpy(task->name, name);
 
@@ -137,17 +145,42 @@ void exit(void)
         prev->next = current_task->next;
     }
 
-    // We're still executing on this task's kernel stack, so we cannot free it
-    // (or the task struct) here -- doing so would pull the rug out from under
-    // the switch below. A proper implementation hands teardown to a reaper
-    // task; for now the memory is intentionally leaked.
+    // We're still executing on this task's kernel stack, so we can't free it
+    // here. Hand ourselves to the zombie list (via reap_next, a separate link
+    // so schedule()'s use of ->next below still walks the ready queue). Our own
+    // ->next is left untouched so the switch continues round-robin correctly.
+    current_task->reap_next = (struct task *)zombie_queue;
+    zombie_queue = current_task;
+
     asm volatile("sti");
 
-    // Switch away for good. Because we're unlinked, the scheduler will never
-    // pick this task again, so task_switch() never returns.
+    // Switch away for good. Because we're off the ready queue, the scheduler
+    // never picks this task again, so task_switch() never returns.
     task_switch();
 
     panic("exit(): returned from final task_switch!\n");
+}
+
+void reap_tasks(void)
+{
+    asm volatile("cli");
+    struct task *z = (struct task *)zombie_queue;
+    zombie_queue = 0;
+    asm volatile("sti");
+
+    while (z) {
+        struct task *next = z->reap_next;
+
+        if (z->stack_mem) {
+            kfree(z->stack_mem);
+        }
+        if (z->owns_dir && z->page_directory) {
+            free_directory(z->page_directory);
+        }
+        kfree(z);
+
+        z = next;
+    }
 }
 
 int task_alive(int pid)

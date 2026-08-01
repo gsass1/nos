@@ -16,7 +16,9 @@ struct task
     // which runs on the bootstrap stack from boot.S).
     void *stack_mem;
     struct page_directory *page_directory;
-    struct task *next;
+    int owns_dir; // if set, page_directory is freed when the task is reaped
+    struct task *next;      // ready-queue link
+    struct task *reap_next; // zombie-list link (used only after exit())
 };
 
 void tasking_init(void);
@@ -35,6 +37,11 @@ void task_switch(void);
 
 // Terminate the current task and switch away permanently. Never returns.
 void exit(void);
+
+// Free the resources of tasks that have exit()ed. Safe to call from the idle
+// loop; it runs in its own address space, so it can free a dead task's stack
+// and page directory without pulling the rug out from under itself.
+void reap_tasks(void);
 
 int getpid(void);
 

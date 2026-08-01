@@ -46,15 +46,13 @@ struct multiboot {
 
 struct multiboot *mbootptr;
 
-uint32_t initial_esp;
-
 extern uint32_t kernel_base, kernel_end;
 
 // Assembly code from boot.S jumps directly to here
 void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 {
+    (void)initial_stack; // boot.S passes the boot esp; no longer needed
     mbootptr = multiboot;
-    initial_esp = initial_stack;
 
 	// Initialize these first, want early text output!
 	vga_init();
@@ -83,9 +81,13 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 	// We can enable interrupts now
     asm volatile("sti");
 
-	// Memory initialization
+	// Memory initialization. Total RAM comes from the multiboot mem_upper field
+	// (KB above 1MB); fall back to 16MB if the bootloader didn't provide it.
     heap_init();
-    mm_paging_init();
+    uint32_t mem_size = (mbootptr->flags & 0x1)
+                        ? (0x100000 + mbootptr->mem_upper * 1024)
+                        : 0x1000000;
+    mm_paging_init(mem_size);
 
 	// PS/2 keyboard initalization
     kbd_init();
@@ -113,9 +115,11 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 		panic("Failed to load /sh from initrd\n");
 	}
 
-	// The kernel task's job is done. Idle so the timer keeps scheduling the
-	// shell (and anything it spawns); hlt parks the CPU until the next IRQ.
+	// The kernel task's job is done. It becomes the idle/reaper task: free any
+	// exited tasks, then hlt until the next IRQ (which reschedules the shell and
+	// anything it spawned).
 	for(;;) {
+		reap_tasks();
 		asm volatile("hlt");
 	}
 }

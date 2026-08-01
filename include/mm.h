@@ -32,7 +32,8 @@ void alloc_frame(struct page *page, int is_kernel, int is_writeable);
 
 void heap_init(void);
 
-void mm_paging_init(void);
+// mem_size is the total physical memory in bytes (sizes the frame allocator).
+void mm_paging_init(uint32_t mem_size);
 
 void switch_page_directory(struct page_directory *new);
 
@@ -41,6 +42,11 @@ struct page *get_page(uint32_t addr, int make, struct page_directory *dir);
 struct page_table *clone_table(struct page_table *src, uint32_t *phys_addr);
 
 struct page_directory *clone_directory(struct page_directory *src);
+
+// Free a cloned address space (frames + user page tables + the directory).
+void free_directory(struct page_directory *dir);
+
+void free_frame(struct page *page);
 
 // Page aligned
 void *kmalloc_a(uint32_t size);
