@@ -22,10 +22,12 @@ INITRD=initrd/initrd.tar
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
 USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr
 OBJ=boot/boot.o \
-drivers/keyboard.o \
-drivers/mouse.o \
-drivers/serial.o \
-kernel/console.o \
+	drivers/keyboard.o \
+	drivers/mouse.o \
+	drivers/serial.o \
+	drivers/ata.o \
+	kernel/block.o \
+	kernel/console.o \
 kernel/copy_page_physical.o \
 kernel/gdt.o \
 kernel/elf.o \
@@ -63,6 +65,12 @@ drivers/mouse.o: drivers/mouse.c
 
 drivers/serial.o: drivers/serial.c
 	$(CC) -c drivers/serial.c -o drivers/serial.o $(CFLAGS)
+
+drivers/ata.o: drivers/ata.c
+	$(CC) -c drivers/ata.c -o drivers/ata.o $(CFLAGS)
+
+kernel/block.o: kernel/block.c
+	$(CC) -c kernel/block.c -o kernel/block.o $(CFLAGS)
 
 kernel/console.o: kernel/console.c
 	$(CC) -c kernel/console.c -o kernel/console.o $(CFLAGS)
@@ -221,6 +229,10 @@ run: $(BIN) $(INITRD)
 # serial output and the VGA screen. See tests/run_tests.py.
 test: $(BIN) $(INITRD)
 	python3 tests/run_tests.py
+	python3 tests/run_ata_tests.py
+
+test-ata: $(BIN) $(INITRD)
+	python3 tests/run_ata_tests.py
 
 clean:
 	rm -f $(OBJ)
