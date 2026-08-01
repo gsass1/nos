@@ -146,6 +146,12 @@ iso: $(BIN) $(INITRD)
 
 # Build a freestanding user program: compile, then link at the user base
 # address (see user/user.ld) into a flat ELF the kernel's elf_exec() loads.
+$(USERPROGS): | initrd-dir
+
+.PHONY: initrd-dir
+initrd-dir:
+	mkdir -p initrd
+
 initrd/hello: user/hello.c user/ulib.h user/user.ld include/syscall.h
 	$(CC) -c user/hello.c -o user/hello.o $(CFLAGS)
 	$(LD) -T user/user.ld user/hello.o -o initrd/hello
@@ -220,4 +226,5 @@ clean:
 	rm -f $(OBJ)
 	rm -f $(BIN)
 	rm -f $(ISO)
-	rm -f user/*.o $(USERPROGS)
+	rm -f user/*.o
+	rm -rf initrd
