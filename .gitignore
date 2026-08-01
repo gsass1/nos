@@ -5,3 +5,9 @@
 iso/symtable
 
 serial_com1.txt
+
+# Debug artifacts (see docs/DEBUGGING.md)
+serial_out.txt
+qlog.txt
+exec.txt
+ex.txt

@@ -7,6 +7,7 @@
 #include <pic.h>
 #include <pit.h>
 #include <serial.h>
+#include <string.h>
 #include <sym.h>
 #include <task.h>
 #include <va_list.h>
@@ -81,7 +82,7 @@ void shell(void)
 	char *buffer = kmalloc(256);
 
 loop:
-	memset(0, buffer, 256);
+	memset(buffer, 0, 256);
     kprintf("\nNOS: ");
     int i = 0;
 	while(1) {

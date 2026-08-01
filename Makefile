@@ -1,10 +1,12 @@
 AS=i686-elf-as
 AFLAGS=-g
 CC=i686-elf-gcc
-CFLAGS=-I./include/ -std=gnu99 -ffreestanding -nostdlib -g -Wall -Wextra -fpermissive
+CFLAGS=-I./include/ -std=gnu99 -ffreestanding -nostdlib -g -Wall -Wextra
 LFLAGS=-lgcc
+NM=i686-elf-nm
 BIN=kernel.elf
 ISO=gianos.iso
+INITRD=initrd/initrd.tar
 OBJ=boot/boot.o \
 drivers/keyboard.o \
 drivers/serial.o \
@@ -95,17 +97,23 @@ kernel/vsprintf.o: kernel/vsprintf.c
 $(BIN): $(OBJ)
 	$(CC) -T linker.ld -o $(BIN) $(CFLAGS) $(OBJ) $(LFLAGS)
 
-iso: $(BIN)
+iso: $(BIN) $(INITRD)
 	cp $(BIN) iso
-	nm $(BIN) > symtable
-	cp symtable iso
-	rm -f symtable
+	cp $(INITRD) iso/initrd.tar
 	mkisofs -R -b boot/grub/stage2_eltorito -no-emul-boot -boot-load-size 4 -boot-info-table -o $(ISO) iso
+
+# Regenerate the initrd containing an address-sorted symbol table matching
+# the current kernel build, so backtraces resolve to the right names.
+$(INITRD): $(BIN)
+	$(NM) -n $(BIN) > initrd/symtable
+	cd initrd && tar --format ustar -cf initrd.tar symtable
+
+initrd: $(INITRD)
 
 # Boot the multiboot kernel directly in QEMU with the initrd as a module
 # (no GRUB/ISO needed). Serial (com1) is routed to stdio; Ctrl-A X quits.
-run: $(BIN)
-	qemu-system-i386 -kernel $(BIN) -initrd initrd/initrd.tar -serial stdio
+run: $(BIN) $(INITRD)
+	qemu-system-i386 -kernel $(BIN) -initrd $(INITRD) -serial stdio
 
 clean:
 	rm -f $(OBJ)

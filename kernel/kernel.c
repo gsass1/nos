@@ -26,48 +26,120 @@ struct sym
     struct sym *next;
 };
 
+// Symbols sorted by ascending address, populated from the "symtable" file
+// (nm output) in the initrd. Used to resolve return addresses in backtraces.
 static struct sym *symbol_map;
+static uint32_t symbol_count;
 
-static int hextoint(const char *str)
+static int sym_is_hex(char c)
 {
-    return (int)strtol(str, 0, 16);
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
-static void sym_parse_symtable(uint8_t *buffer)
+static uint32_t sym_parse_hex8(const char *s)
 {
+    uint32_t v = 0;
+    int i;
+    for(i = 0; i < 8 && sym_is_hex(s[i]); i++) {
+        char c = s[i];
+        uint32_t d = (c <= '9') ? (uint32_t)(c - '0')
+                   : (c <= 'F') ? (uint32_t)(c - 'A' + 10)
+                   : (uint32_t)(c - 'a' + 10);
+        v = (v << 4) | d;
+    }
+    return v;
+}
+
+static void sym_insert(uint32_t addr, char type, const char *name)
+{
+    struct sym *s = kmalloc(sizeof(struct sym));
+    s->addr = addr;
+    s->type = type;
+    strncpy(s->name, name, sizeof(s->name) - 1);
+    s->name[sizeof(s->name) - 1] = '\0';
+
+    // Keep the list sorted by ascending address so sym_get can scan it.
+    if(!symbol_map || addr < symbol_map->addr) {
+        s->next = symbol_map;
+        symbol_map = s;
+    } else {
+        struct sym *cur = symbol_map;
+        while(cur->next && cur->next->addr <= addr) {
+            cur = cur->next;
+        }
+        s->next = cur->next;
+        cur->next = s;
+    }
+    symbol_count++;
+}
+
+// Parses `nm` output: each line is "AAAAAAAA T name". Lines for undefined
+// symbols have blanks instead of an address and are skipped. Only text
+// (code) symbols are kept, since backtraces resolve instruction pointers.
+static void sym_parse_symtable(char *buffer)
+{
+    char *p = buffer;
+    while(*p) {
+        char *line = p;
+        while(*p && *p != '\n') {
+            p++;
+        }
+        if(*p == '\n') {
+            *p++ = '\0';
+        }
+
+        if(sym_is_hex(line[0])) {
+            uint32_t addr = sym_parse_hex8(line);
+            char *q = line + 8;
+            while(*q == ' ') {
+                q++;
+            }
+            char type = *q;
+            if(type) {
+                q++;
+                while(*q == ' ') {
+                    q++;
+                }
+                if(*q && (type == 't' || type == 'T')) {
+                    sym_insert(addr, type, q);
+                }
+            }
+        }
+    }
 }
 
 void sym_init(void)
-{ 
-    uint8_t *temp = kmalloc(8192);
-    int i = 0;
-    struct dirent *node = 0;
-    while((vfs_readdir(fs_root, i)) != 0) {
-        if(strcmp(node->name, "symtable") == 0) {
-            if(vfs_read(node, 0, 8192, temp) != 0) {
-                sym_parse_symtable(temp);
-            } else {
-				kprintf("Sym: vfs_read failed!\n");
-			}	
-        }
-        i++;
+{
+    char name[] = "symtable";
+    struct fs_node *node = vfs_finddir(fs_root, name);
+    if(!node) {
+        kprintf("Sym: symtable not found in initrd\n");
+        return;
     }
-    kprintf("Sym: failed to init!\n");
+
+    uint8_t *buf = kmalloc(node->length + 1);
+    uint32_t read = vfs_read(node, 0, node->length, buf);
+    if(read == 0) {
+        kprintf("Sym: failed to read symtable\n");
+        return;
+    }
+    buf[read] = '\0';
+
+    sym_parse_symtable((char *)buf);
+    kprintf("Sym: loaded %d symbols\n", symbol_count);
 }
 
 const char *sym_get(uint32_t addr)
 {
-    #if 0
+    // List is sorted ascending; the enclosing symbol is the last one whose
+    // address is <= addr.
+    const char *name = "unknown";
     struct sym *sym = symbol_map;
-    while(sym) {
-        if(sym->addr < addr && sym->next->addr > addr) {
-            return sym->name;
-        } else {
-            sym = sym->next;
-        }
+    while(sym && sym->addr <= addr) {
+        name = sym->name;
+        sym = sym->next;
     }
-    #endif
-    return "unknown";
+    return name;
 }
 
 void halt(void)
