@@ -101,7 +101,8 @@ flowchart TD
     F --> G["heap_init<br/>mm_paging_init(mem_size)"]
     G --> H["ata_init<br/>IDENTIFY disks"]
     H --> H2["kbd_init"]
-    H2 --> I["initrd_init -> fs_root"]
+    H2 --> H3["net_init<br/>(rtl8139 probe + IPv4/TCP stack)"]
+    H3 --> I["initrd_init -> fs_root"]
     I --> I2["ext2_mount(block_get(0))<br/>-> /disk mountpoint (if disk present)"]
     I2 --> I3["sym_init"]
     I3 --> J["syscall_init<br/>(int 0x80 gate)"]
@@ -439,7 +440,8 @@ all use `vfs_resolve` instead of the old single-level `vfs_finddir`.
 The initrd (`kernel/initrd.c`) is a **ustar tar** passed as a Multiboot module.
 `initrd_init` parses the tar into a flat list of file nodes (plus a synthetic
 `dev` directory). Each file's `read` returns bytes straight out of the tar image
-in memory. The initrd holds the symbol table and all user programs.
+in memory. The initrd currently holds `symtable` plus the user programs listed in the
+Makefile's `USERPROGS` (`sh`, `hello`, `cat`, `wget`, ...).
 
 ### ext2 mount
 
@@ -490,6 +492,8 @@ the `mkdir` utility creates directories from the shell.
 | PIT     | `kernel/pit.c`      | 200 Hz timer; IRQ0 drives the scheduler |
 | ATA     | `drivers/ata.c`     | Legacy primary/secondary PIO; IDENTIFY plus bounded polling LBA28 reads, writes, and cache flush |
 | ext2    | `kernel/ext2.c`     | Revision-0 ext2 read/write: mount validation, directory listing/lookup, file read (direct + singly-indirect), create/truncate/write, mkdir with bitmap/free-count/link-count maintenance; serialized by per-mount mutex |
+| Ethernet| `drivers/rtl8139.c` | RTL8139 over PCI; RX ring drained in IRQ context into `net_rx`, 4 bounce-buffered TX slots |
+| RTC     | `drivers/rtc.c`     | CMOS clock read once at boot; `SYS_TIME` extrapolates via the PIT tick counter |
 
 `kprintf` writes to both VGA and serial (guarded by a mutex); `mprintf` prefixes
 a module tag; `panic` prints a message and a symbolic stack trace, then halts.
@@ -500,6 +504,31 @@ ATA channels are mutex-serialized, and device interrupts stay disabled because
 this first storage path uses bounded polling. The initrd remains the root
 filesystem; ext2 is mounted as `/disk` when a valid filesystem is present on the
 first ATA device. No raw disk interface is exposed to ring 3.
+
+**Networking** (`kernel/net.c`, `kernel/tcp.c`): a minimal IPv4 stack sized
+for QEMU's user-mode (slirp) topology -- static config `10.0.2.15/24`, every
+destination reached through the gateway IP (`10.0.2.2`, its MAC resolved once
+via ARP), DNS at `10.0.2.3`. All receive-side protocol processing (ethernet
+demux, ARP, IP, UDP/DNS matching, TCP input) runs in the NIC's IRQ handler
+with interrupts off; task-side senders update shared multi-word state only
+under `irq_save`, while blocking waits poll single-word completion flags
+(`gw_valid`, DNS done, TCP state) unmasked -- safe on a single CPU where the
+IRQ path is the only writer. TCP is client-only
+with stop-and-wait transmission, and every retransmission timer is a blocking
+task-context loop polling `timer_ticks` (the `sys_sleep` pattern) -- there are
+no timer callbacks. Sockets surface as refcounted `FD_SOCKET` fds created by
+`SYS_CONNECT` (plus `SYS_RESOLVE` for DNS) and are then plain `read`/`write`/
+`close` streams; `user/wget.c` does an HTTP/1.0 GET over one.
+
+**HTTPS** is implemented entirely in userland: `wget` links a vendored,
+cross-compiled BearSSL (`third_party/bearssl/`, portable constant-time code
+only) against the 5-function shim libc in `user/libc/`, layering TLS 1.2 over
+the plain socket fd. Certificates are verified with `br_x509_minimal` against
+the trust anchors embedded in `user/trust_anchors.h` (GTS Root R1, ISRG Root
+X1, and the checked-in test CA), with validity time from `SYS_TIME`; `wget -k`
+downgrades to encrypted-but-unauthenticated for other chains. Entropy for the
+handshake is rdtsc/wall-clock mixing -- adequate for a hobby OS, not
+cryptographically strong.
 
 ---
 
@@ -534,6 +563,11 @@ first ATA device. No raw disk interface is exposed to ring 3.
 | `kernel/pit.c` | Timer (200 Hz) |
 | `kernel/block.c`, `drivers/ata.c` | Block-device registry and polling ATA PIO |
 | `kernel/ext2.c`, `include/ext2.h` | ext2 rev-0 read/write filesystem |
+| `kernel/pci.c` | PCI config-space access (mechanism #1) |
+| `drivers/rtl8139.c` | RTL8139 ethernet driver |
+| `drivers/rtc.c` | CMOS wall clock (SYS_TIME) |
+| `kernel/net.c`, `kernel/tcp.c` | Ethernet/ARP/IPv4/UDP/DNS and client TCP |
+| `third_party/bearssl/`, `user/libc/`, `user/trust_anchors.h` | Vendored TLS library, shim libc, embedded roots (HTTPS in `user/wget.c`) |
 | `kernel/interrupt.S` | ISR stubs, `SAVE/RESTORE_REGS`, `task_switch`, `_asm_syscall` |
 | `kernel/isr.c` | C exception/IRQ handlers |
 | `kernel/paging.c` | Frame allocator, page tables, `clone/free_directory` |
@@ -544,7 +578,7 @@ first ATA device. No raw disk interface is exposed to ring 3.
 | `kernel/vfs.c`, `kernel/initrd.c` | VFS (hierarchical path resolution) + initrd (tar) |
 | `kernel/vga.c`, `drivers/keyboard.c`, `drivers/serial.c` | Drivers |
 | `kernel/kernel.c` | `kprintf`/`mprintf`/`panic`, symbol table, stack traces |
-| `user/sh.c`, `user/hello.c`, `user/disktest.c`, `user/mkdir.c`, `user/user.ld` | Userspace programs |
+| `user/sh.c`, `user/hello.c`, `user/disktest.c`, `user/mkdir.c`, `user/wget.c`, `user/browser.c`, `user/user.ld` | Userspace programs |
 | `include/*.h` | Public headers for each subsystem |
 
 ---

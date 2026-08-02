@@ -10,10 +10,11 @@ struct pipe;
 // What an fd refers to. Every task gets fds 0/1/2 (stdin/stdout/stderr) at
 // spawn -- either the real VGA console/keyboard or a console channel (a
 // terminal window) -- and children inherit them through exec, Unix-style.
-// fds 3+ are files opened from the initrd, or pipe ends. Pipe ends are the
-// one refcounted type: duplicate through file_addref, drop through
-// file_close, and exit()/task_kill() close a dying task's whole table so a
-// blocked peer sees EOF promptly. FD_NONE (0) means the slot is free.
+// fds 3+ are files opened from the initrd, pipe ends, or TCP sockets. Pipe
+// ends and sockets are the refcounted types: duplicate through file_addref,
+// drop through file_close, and exit()/task_kill() close a dying task's whole
+// table so a blocked peer sees EOF promptly. FD_NONE (0) means the slot is
+// free.
 enum fd_type
 {
     FD_NONE = 0,
@@ -22,6 +23,7 @@ enum fd_type
     FD_FILE,    // initrd file
     FD_PIPE_R,  // read end of a pipe (see pipe.h)
     FD_PIPE_W,  // write end of a pipe
+    FD_SOCKET,  // TCP connection (see tcp.h)
 };
 
 // OR'd into an FD_FILE type to mark access mode. sys_write rejects FD_FILE
@@ -38,6 +40,7 @@ struct file
     uint32_t offset;      // FD_FILE
     int cid;              // FD_CHANNEL
     struct pipe *pipe;    // FD_PIPE_R / FD_PIPE_W
+    int sock;             // FD_SOCKET
 };
 
 #define TASK_MAX_FILES 8
@@ -69,8 +72,8 @@ struct task
 };
 
 // Account for a duplicated / dropped reference to the object behind a file.
-// Only pipe ends carry state that needs this; for every other type addref is
-// a no-op and close just clears the slot.
+// Pipe ends and sockets carry references; other types only need the slot
+// cleared on close.
 void file_addref(struct file *f);
 void file_close(struct file *f);
 

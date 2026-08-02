@@ -6,6 +6,10 @@
 // Read a 32-bit register from PCI configuration space (mechanism #1).
 uint32_t pci_config_read(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t offset);
 
+// Write a 32-bit register in PCI configuration space (mechanism #1).
+void pci_config_write(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t offset,
+                      uint32_t value);
+
 // Scan for a device by vendor/device id. Returns 1 and fills bus/dev if
 // found, 0 otherwise.
 int pci_find_device(uint16_t vendor, uint16_t device, uint8_t *bus_out,

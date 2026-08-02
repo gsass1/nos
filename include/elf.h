@@ -53,6 +53,13 @@ struct elf32_phdr
 // SYS_FBMAP maps the linear framebuffer here in the calling process.
 #define USER_FB_BASE   0x78000000U
 
+// Window surfaces (SYS_WCREATE/SYS_WMAP): a client's own surface pixels map
+// at USER_WSURF_BASE; a server's view of slot i maps at
+// USER_WSRV_BASE + i * WSURF_SLOT_SPAN (2MB per slot covers 800x600x32).
+#define USER_WSURF_BASE 0x74000000U
+#define USER_WSRV_BASE  0x74400000U
+#define WSURF_SLOT_SPAN 0x00200000U
+
 // exec() argument limits: how many argv entries and how many total string
 // bytes elf_exec will copy onto the new process's stack.
 #define EXEC_MAX_ARGS    16

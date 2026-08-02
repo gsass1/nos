@@ -74,6 +74,9 @@ static inline int pollc(void)                 { return sys0(SYS_POLLC); }
 static inline int getfont(void *buf8192)      { return sys1(SYS_FONT, (int)buf8192); }
 static inline int uptime_ms(void)             { return sys0(SYS_UPTIME); }
 
+// Unix seconds (UTC) from the CMOS clock, or 0 if it was unreadable at boot.
+static inline unsigned time_unix(void)        { return (unsigned)sys0(SYS_TIME); }
+
 // Console channels: run a program in a captured terminal (see SYS_EXECC).
 static inline int execc(const char *path, char *const argv[])
 {
@@ -85,12 +88,42 @@ static inline int cstat(int cid)                      { return sys1(SYS_CSTAT, c
 static inline int cclose(int cid)                     { return sys1(SYS_CCLOSE, cid); }
 static inline int kill(int pid)                       { return sys1(SYS_KILL, pid); }
 
+// DNS A lookup: writes the address (wire order, as SYS_CONNECT wants it)
+// to *ip. Returns 0, or -1 (no NIC, bad name, or resolver timeout).
+static inline int resolve(const char *name, unsigned *ip)
+{
+    return sys3(SYS_RESOLVE, (int)name, (int)ip, 0);
+}
+
+// Open a TCP connection; returns a socket fd to read/write/close, or -1.
+static inline int connect(unsigned ip, int port)
+{
+    return sys3(SYS_CONNECT, (int)ip, port, 0);
+}
+
 // Enters graphics mode; returns the mapped 32bpp framebuffer, or (void *)-1.
 static inline void *fbmap(void)
 {
     int r = sys0(SYS_FBMAP);
     return (void *)r;
 }
+
+// Window surfaces (see syscall.h): client side -- create an offscreen buffer
+// the display server composites, and poll the input events it forwards.
+static inline void *wcreate(int w, int h) { return (void *)sys3(SYS_WCREATE, w, h, 0); }
+static inline int wevent(struct wev *ev)  { return sys1(SYS_WEVENT, (int)ev); }
+
+// Server side: inspect slots, map a client's pixels, send events, release.
+static inline int wstat(int slot, struct wsurf_info *out)
+{
+    return sys3(SYS_WSTAT, slot, (int)out, 0);
+}
+static inline void *wmap(int slot)        { return (void *)sys1(SYS_WMAP, slot); }
+static inline int wsend(int slot, const struct wev *ev)
+{
+    return sys3(SYS_WSEND, slot, (int)ev, 0);
+}
+static inline int wunmap(int slot)        { return sys1(SYS_WUNMAP, slot); }
 
 static inline int slen(const char *s)
 {

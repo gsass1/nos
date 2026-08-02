@@ -1,9 +1,12 @@
 #include <elf.h>
+#include <fb.h>
 #include <gdt.h>
+#include <wsurf.h>
 #include <mm.h>
 #include <pipe.h>
 #include <string.h>
 #include <task.h>
+#include <tcp.h>
 #include <kernel.h>
 #include <debug.h>
 
@@ -33,6 +36,8 @@ void file_addref(struct file *f)
 {
     if (FD_TYPE(f->type) == FD_PIPE_R || FD_TYPE(f->type) == FD_PIPE_W) {
         pipe_addref(f->pipe, FD_TYPE(f->type) == FD_PIPE_W);
+    } else if (FD_TYPE(f->type) == FD_SOCKET) {
+        tcp_addref(f->sock);
     }
 }
 
@@ -40,10 +45,13 @@ void file_close(struct file *f)
 {
     if (FD_TYPE(f->type) == FD_PIPE_R || FD_TYPE(f->type) == FD_PIPE_W) {
         pipe_release(f->pipe, FD_TYPE(f->type) == FD_PIPE_W);
+    } else if (FD_TYPE(f->type) == FD_SOCKET) {
+        tcp_release(f->sock);
     }
     f->type = FD_NONE;
     f->node = 0;
     f->pipe = 0;
+    f->sock = 0;
 }
 
 // Drop every fd a dying task holds. This must happen when the task dies, not
@@ -209,6 +217,12 @@ void exit(int code)
     }
 
     close_all_files((struct task *)current_task);
+    // Like the fd table, the display and any window surface must be released
+    // at death, not later: past this point the task never runs again, and
+    // code after the sti below is abandoned if the timer preempts first.
+    fb_task_exit(current_task->id);
+    wsurf_task_exit(current_task->id,
+                    (struct page_directory *)current_task->page_directory);
 
     exit_records[exit_record_next].pid = current_task->id;
     exit_records[exit_record_next].code = code;
@@ -305,6 +319,8 @@ int task_kill(int pid)
     prev->next = t->next;
 
     close_all_files(t);
+    fb_task_exit(t->id);
+    wsurf_task_exit(t->id, t->page_directory);
 
     exit_records[exit_record_next].pid = t->id;
     exit_records[exit_record_next].code = -9;

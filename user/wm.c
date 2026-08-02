@@ -4,8 +4,12 @@
 // uptime clock. Renders into an sbrk'd backbuffer copied to the framebuffer
 // each frame.
 //
-// This is the GUI milestone-3 desktop, iterated. Multi-app windowing
-// (milestone 4) will split it into a window server + clients over IPC.
+// Beyond the built-in window types, wm acts as the display server for
+// window-surface clients (SYS_WCREATE, kernel/wsurf.c): poll_surfaces()
+// windows each client's offscreen pixel buffer, composites it every frame,
+// and forwards keyboard/mouse input to the client as events. Graphics apps
+// (e.g. browser) run fullscreen when the display is free and window
+// themselves automatically when wm holds it.
 #include "ulib.h"
 #include "gfx.h"
 
@@ -56,6 +60,12 @@ struct win
     int cid;
     char grid[TROWS][TCOLS + 1];
     int trow, tcol;
+    // Surface windows composite a client's SYS_WCREATE pixel buffer and
+    // forward input to it as events. surf is the kernel slot, or -1.
+    int surf;
+    volatile unsigned int *spix;
+    int sw, sh;
+    int lastmx, lastmy, lastbtn; // last mouse state forwarded to the client
 };
 
 static struct win wins[MAXWIN];
@@ -166,6 +176,8 @@ static int spawn(const char *title)
     w->tlen = 0;
     w->term = 0;
     w->cid = -1;
+    w->surf = -1;
+    w->spix = 0;
     if (title) {
         scopy(w->title, title, sizeof(w->title));
     } else {
@@ -195,7 +207,17 @@ static void draw_window(struct win *w, int focused)
     gfx_frame(&bb, bxc, by, BTN_SZ, BTN_SZ, COL_BORDER);
     gfx_char(&bb, bxc + 5, by + 1, 'x', COL_TEXT);
 
-    if (w->term) {
+    if (w->surf >= 0 && w->spix) {
+        // Composite the client's pixels 1:1. The window was sized to fit the
+        // surface exactly and drag clamping keeps it fully onscreen.
+        for (int r = 0; r < w->sh; r++) {
+            volatile unsigned int *src = w->spix + r * w->sw;
+            unsigned int *dst = bb.buf + (w->y + TITLE_H + r) * bb.w + w->x + 1;
+            for (int c = 0; c < w->sw; c++) {
+                dst[c] = src[c];
+            }
+        }
+    } else if (w->term) {
         gfx_fill(&bb, w->x + 1, w->y + TITLE_H, w->w - 2, w->h - TITLE_H - 1,
                  COL_TERM_BG);
         for (int r = 0; r < TROWS; r++) {
@@ -208,9 +230,12 @@ static void draw_window(struct win *w, int focused)
         gfx_text(&bb, w->x + 12 + 6 * 8, w->y + TITLE_H + 36, w->text, COL_TEXT);
     }
 
-    // Resize grip: a few dots in the bottom-right corner.
-    for (int i = 0; i < 3; i++) {
-        gfx_fill(&bb, w->x + w->w - 5 - i * 4, w->y + w->h - 5, 2, 2, COL_BORDER);
+    // Resize grip: a few dots in the bottom-right corner. Surface windows
+    // are fixed to their buffer's size and have no grip.
+    if (w->surf < 0) {
+        for (int i = 0; i < 3; i++) {
+            gfx_fill(&bb, w->x + w->w - 5 - i * 4, w->y + w->h - 5, 2, 2, COL_BORDER);
+        }
     }
 }
 
@@ -362,6 +387,57 @@ static void close_terminal(struct win *w)
     w->cid = -1;
 }
 
+// One pass over the kernel's surface slots: window new client surfaces,
+// tear down windows whose client died. Serial-logged for the test harness.
+static void poll_surfaces(void)
+{
+    for (int s = 0; s < WSURF_SLOTS; s++) {
+        int have = -1;
+        for (int i = 0; i < MAXWIN; i++) {
+            if (wins[i].alive && wins[i].surf == s) {
+                have = i;
+                break;
+            }
+        }
+        struct wsurf_info si;
+        int live = wstat(s, &si) == 0 && si.alive;
+        if (live && have < 0) {
+            int slot = spawn(si.name);
+            if (slot < 0) {
+                continue;
+            }
+            struct win *w = &wins[slot];
+            w->spix = wmap(s);
+            if (w->spix == (volatile unsigned int *)-1) {
+                w->spix = 0;
+                close_win(slot);
+                continue;
+            }
+            w->surf = s;
+            w->sw = si.w;
+            w->sh = si.h;
+            w->w = si.w + 2;
+            w->h = si.h + TITLE_H + 1;
+            w->x = 60 + s * 30;
+            w->y = 40 + s * 24;
+            w->lastmx = w->lastmy = -1;
+            w->lastbtn = 0;
+            put("wm: surface '");
+            put(w->title);
+            put("' ");
+            puti(w->sw);
+            put("x");
+            puti(w->sh);
+            put("\n");
+        } else if (!live && have >= 0) {
+            wunmap(s);
+            wins[have].spix = 0;
+            close_win(have);
+            put("wm: surface closed\n");
+        }
+    }
+}
+
 static void spawn_about(void)
 {
     int slot = spawn("about");
@@ -399,9 +475,11 @@ void _start(void)
     // Initial demo windows (fixed geometry: the test suite asserts on it).
     struct win *w = &wins[0];
     w->alive = 1; w->x = 140; w->y = 120; w->w = 400; w->h = 300;
+    w->surf = -1;
     scopy(w->title, "welcome", sizeof(w->title));
     w = &wins[1];
     w->alive = 1; w->x = 420; w->y = 260; w->w = 360; w->h = 240;
+    w->surf = -1;
     scopy(w->title, "notes", sizeof(w->title));
     zorder[0] = 0;
     zorder[1] = 1;
@@ -428,7 +506,10 @@ void _start(void)
                 continue;
             }
             struct win *fw = &wins[t];
-            if (fw->term) {
+            if (fw->surf >= 0) {
+                struct wev ev = { WEV_KEY, c, 0, 0 };
+                wsend(fw->surf, &ev);
+            } else if (fw->term) {
                 // Forward everything (incl. \n and \b) to the process in the
                 // terminal; its own echo comes back through the out ring.
                 char ch = (char)c;
@@ -500,10 +581,17 @@ void _start(void)
                     int bxc = hw->x + hw->w - BTN_SZ - 3;
                     int in_y = m.y >= by && m.y < by + BTN_SZ;
                     if (in_y && m.x >= bxc && m.x < bxc + BTN_SZ) {
-                        if (hw->term) {
-                            close_terminal(hw);
+                        if (hw->surf >= 0) {
+                            // Ask the client to exit; the window disappears
+                            // once it does (poll_surfaces sees alive drop).
+                            struct wev ev = { WEV_CLOSE, 0, 0, 0 };
+                            wsend(hw->surf, &ev);
+                        } else {
+                            if (hw->term) {
+                                close_terminal(hw);
+                            }
+                            close_win(wi);
                         }
-                        close_win(wi);
                     } else if (in_y && m.x >= bxm && m.x < bxm + BTN_SZ) {
                         wins[wi].min = 1;
                         raise_win(wi);
@@ -513,7 +601,8 @@ void _start(void)
                         drag_oy = m.y - hw->y;
                         raise_win(wi);
                     }
-                } else if (m.x >= hw->x + hw->w - GRIP_SZ &&
+                } else if (hw->surf < 0 &&
+                           m.x >= hw->x + hw->w - GRIP_SZ &&
                            m.y >= hw->y + hw->h - GRIP_SZ) {
                     resizing = wi;
                     drag_ox = hw->x + hw->w - m.x;
@@ -562,16 +651,43 @@ void _start(void)
             }
         }
 
+        poll_surfaces();
+
+        // Forward the mouse to the focused surface window while the cursor
+        // is over its body (window-relative coordinates, deduplicated).
+        int ts = topmost();
+        if (ts >= 0 && wins[ts].surf >= 0 && dragging < 0) {
+            struct win *tw = &wins[ts];
+            int bx = m.x - (tw->x + 1);
+            int by = m.y - (tw->y + TITLE_H);
+            if (bx >= 0 && by >= 0 && bx < tw->sw && by < tw->sh &&
+                (bx != tw->lastmx || by != tw->lastmy ||
+                 (int)(m.buttons & 1) != tw->lastbtn)) {
+                struct wev ev = { WEV_MOUSE, bx, by, (int)m.buttons };
+                wsend(tw->surf, &ev);
+                tw->lastmx = bx;
+                tw->lastmy = by;
+                tw->lastbtn = m.buttons & 1;
+            }
+        }
+
         prev = m;
         draw_all(m.x, m.y);
         sleep(15);
     }
 
 out:
-    // Ask any shells still running in terminals to exit before we leave.
+    // Ask any shells still running in terminals to exit before we leave,
+    // and tell surface clients to close (their pixels go nowhere once the
+    // server mapping is released).
     for (int i = 0; i < MAXWIN; i++) {
         if (wins[i].alive && wins[i].term) {
             close_terminal(&wins[i]);
+        }
+        if (wins[i].alive && wins[i].surf >= 0) {
+            struct wev ev = { WEV_CLOSE, 0, 0, 0 };
+            wsend(wins[i].surf, &ev);
+            wunmap(wins[i].surf);
         }
     }
     fboff();
