@@ -34,6 +34,10 @@ jobs:
 
       - name: Boot and integration tests
         run: make test
+        env:
+          # A runner image losing e2fsprogs must fail the ext2 suite, not
+          # silently skip it (tests/run_ext2_tests.py honors this).
+          NOS_REQUIRE_EXT2_TOOLS: 1
 
       - name: Upload serial log on failure
         if: failure()
