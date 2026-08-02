@@ -143,7 +143,6 @@ static struct fs_node *initrd_finddir(struct fs_node *node, char *name)
 
 static uint32_t initrd_read(struct fs_node *node, uint32_t offset, uint32_t size, uint8_t *buffer)
 {
-	mprintf(LOGLEVEL_DEBUG, "initrd_read called\n");
 
     struct tar_header_chain *header = initrd_get_node_by_inode(node->inode);
     if(offset > header->size) {

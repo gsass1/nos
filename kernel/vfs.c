@@ -8,7 +8,6 @@ struct fs_node *fs_root = 0;
 
 uint32_t vfs_read(struct fs_node *node, uint32_t offset, uint32_t size, uint8_t *buffer)
 {
-	mprintf(LOGLEVEL_DEBUG, "vfs_read called\n");
     if(node->read != 0) {
         return node->read(node, offset, size, buffer);
     } else {
