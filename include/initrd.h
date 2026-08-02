@@ -18,4 +18,9 @@ struct tar_header
 
 struct fs_node *initrd_init(void *ptr);
 
+// Install the ext2 mountpoint node so it appears as "disk" in the initrd root
+// directory listing and is resolvable via vfs_resolve("disk/..."). Pass 0 to
+// remove the mountpoint (no disk present).
+void initrd_set_disk_mount(struct fs_node *node);
+
 #endif

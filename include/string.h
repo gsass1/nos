@@ -14,5 +14,6 @@ void *memset(void *ptr, int c, size_t n);
 long strtol(const char *ptr, char **endptr, int base);
 char *strncpy(char *s1, const char *s2, size_t n);
 int strcmp(const char *s1, const char *s2);
+int memcmp(const void *s1, const void *s2, size_t n);
 
 #endif

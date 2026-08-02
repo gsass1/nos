@@ -49,7 +49,7 @@ int elf_exec(const char *path, const char *const *argv,
         }
     }
 
-    struct fs_node *node = vfs_finddir(fs_root, kpath);
+    struct fs_node *node = vfs_resolve(kpath);
     if (!node) {
         mprintf(LOGLEVEL_DEFAULT, "elf_exec: '%s' not found\n", kpath);
         return -1;

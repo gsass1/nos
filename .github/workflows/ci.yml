@@ -14,13 +14,14 @@ jobs:
         with:
           submodules: true
 
-      - name: Install cross toolchain and QEMU
+      - name: Install cross toolchain, QEMU, and e2fsprogs
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             binutils-i686-linux-gnu \
             gcc-i686-linux-gnu \
-            qemu-system-x86
+            qemu-system-x86 \
+            e2fsprogs
 
       - name: Use Ubuntu i686 cross toolchain
         run: echo "TOOLPREFIX=i686-linux-gnu-" >> "$GITHUB_ENV"

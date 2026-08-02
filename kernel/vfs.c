@@ -1,4 +1,5 @@
 #include <kernel.h>
+#include <string.h>
 #include <vfs.h>
 
 MODULE("VFS ");
@@ -7,7 +8,6 @@ struct fs_node *fs_root = 0;
 
 uint32_t vfs_read(struct fs_node *node, uint32_t offset, uint32_t size, uint8_t *buffer)
 {
-	mprintf(LOGLEVEL_DEBUG, "vfs_read called\n");
     if(node->read != 0) {
         return node->read(node, offset, size, buffer);
     } else {
@@ -41,12 +41,12 @@ void vfs_close(struct fs_node *node)
     }
 }
 
-struct dirent *vfs_readdir(struct fs_node *node, uint32_t index)
+int vfs_readdir(struct fs_node *node, uint32_t index, struct dirent *out)
 {
     if((node->flags&0x7) == FS_DIRECTORY && node->readdir != 0) {
-        return node->readdir(node, index);
+        return node->readdir(node, index, out);
     } else {
-        return 0;
+        return -1;
     }
 }
 
@@ -57,4 +57,74 @@ struct fs_node *vfs_finddir(struct fs_node *node, char *name)
     } else {
         return 0;
     }
+}
+
+// Follow a mountpoint: if the node has FS_MOUNTPOINT set, return its ptr
+// (the mounted root); otherwise return the node itself.
+static struct fs_node *vfs_follow(struct fs_node *node)
+{
+    if (node && (node->flags & FS_MOUNTPOINT) && node->ptr) {
+        return (struct fs_node *)node->ptr;
+    }
+    return node;
+}
+
+struct fs_node *vfs_resolve(const char *path)
+{
+    if (!fs_root || !path) return 0;
+
+    // Skip leading slashes. An empty path (or just "/") resolves to root.
+    while (*path == '/') path++;
+    if (!*path) return fs_root;
+
+    struct fs_node *node = vfs_follow(fs_root);
+    char comp[128];
+
+    for (;;) {
+        // Extract the next path component.
+        uint32_t i = 0;
+        while (*path && *path != '/' && i < sizeof(comp) - 1) {
+            comp[i++] = *path++;
+        }
+        if (*path && *path != '/') {
+            return 0; // component exceeds the VFS name limit
+        }
+        comp[i] = '\0';
+        while (*path == '/') path++;
+
+        if (i == 0) break; // trailing slash
+
+        node = vfs_finddir(node, comp);
+        if (!node) return 0;
+        node = vfs_follow(node);
+
+        if (!*path) break;
+    }
+    return node;
+}
+
+struct fs_node *vfs_create(struct fs_node *dir, const char *name)
+{
+    if (!dir || (dir->flags & 0x7) != FS_DIRECTORY || !dir->ops ||
+        !dir->ops->create) {
+        return 0;
+    }
+    return dir->ops->create(dir, name);
+}
+
+int vfs_truncate(struct fs_node *node)
+{
+    if (!node || !node->ops || !node->ops->truncate) {
+        return -1;
+    }
+    return node->ops->truncate(node);
+}
+
+int vfs_mkdir(struct fs_node *dir, const char *name)
+{
+    if (!dir || (dir->flags & 0x7) != FS_DIRECTORY || !dir->ops ||
+        !dir->ops->mkdir) {
+        return -1;
+    }
+    return dir->ops->mkdir(dir, name);
 }

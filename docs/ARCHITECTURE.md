@@ -102,8 +102,10 @@ flowchart TD
     G --> H["ata_init<br/>IDENTIFY disks"]
     H --> H2["kbd_init"]
     H2 --> H3["net_init<br/>(rtl8139 probe + IPv4/TCP stack)"]
-    H3 --> I["initrd_init -> fs_root<br/>sym_init"]
-    I --> J["syscall_init<br/>(int 0x80 gate)"]
+    H3 --> I["initrd_init -> fs_root"]
+    I --> I2["ext2_mount(block_get(0))<br/>-> /disk mountpoint (if disk present)"]
+    I2 --> I3["sym_init"]
+    I3 --> J["syscall_init<br/>(int 0x80 gate)"]
     J --> K["tasking_init<br/>(kernel_task adopts boot stack)"]
     K --> L["elf_exec('sh')<br/>load + run the shell"]
     L --> M["idle loop:<br/>reap_tasks(); hlt"]
@@ -411,6 +413,8 @@ dispatches a line:
 
 - builtins: `help`, `ls` (via `SYS_READDIR`), `clear`, `exit`;
 - anything else: `SYS_EXEC` it as a program, then `SYS_WAIT` for it to finish.
+  Pipelines (`|`), input redirection (`<`), and output redirection (`>`)
+  are handled by the shell via `SYS_PIPE`/`SYS_EXEC2` and `SYS_OPENMODE`.
 
 So typing `hello` loads and runs `/hello` in its own address space and returns to
 the prompt when it exits. The shell and `hello` both link at `0x40000000` and
@@ -418,16 +422,63 @@ coexist because they're in separate page directories.
 
 ---
 
-## 12. VFS and initrd
+## 12. VFS, initrd, and ext2
 
 `include/vfs.h` defines a minimal VFS node with function pointers
-(`read`/`readdir`/`finddir`). `fs_root` is the root node.
+(`read`/`write`/`readdir`/`finddir`). `fs_root` is the root node — the initrd.
+
+### Hierarchical path resolution
+
+`vfs_resolve(path)` walks `/`-separated path components from `fs_root`, calling
+`finddir` at each level. This lets the initrd root delegate `disk/...` paths to
+the ext2 mountpoint, while flat names like `sh` still resolve to initrd files
+exactly as before. `sys_open`, `sys_openmode`, `sys_listdir`, and `elf_exec`
+all use `vfs_resolve` instead of the old single-level `vfs_finddir`.
+
+### Initrd
 
 The initrd (`kernel/initrd.c`) is a **ustar tar** passed as a Multiboot module.
 `initrd_init` parses the tar into a flat list of file nodes (plus a synthetic
 `dev` directory). Each file's `read` returns bytes straight out of the tar image
 in memory. The initrd currently holds `symtable` plus the user programs listed in the
 Makefile's `USERPROGS` (`sh`, `hello`, `cat`, `wget`, ...).
+
+### ext2 mount
+
+If the first ATA block device contains a valid ext2 filesystem, `ext2_mount`
+(`kernel/ext2.c`) reads and validates the superblock, group descriptor, and
+root inode, then installs the ext2 root as a `"disk"` entry in the initrd root's
+`readdir`/`finddir`. The initrd remains the root filesystem; ext2 is accessible
+only as `/disk/...`.
+
+The ext2 driver supports:
+- **Reads**: directory listing and lookup, regular-file reads through direct
+  (blocks 0–11) and singly-indirect (block 12) block pointers.
+- **Writes**: create/truncate/write of regular files in existing directories.
+  `SYS_OPENMODE` with `O_CREATE`/`O_TRUNC`/`O_WRONLY` opens or creates a
+  writable fd; `sys_write` routes `FD_FILE` writes through VFS with access-mode
+  enforcement (the `FD_WRITABLE` flag).
+- **Directory creation**: `SYS_MKDIR` creates a directory in an existing parent.
+  The ext2 driver allocates an inode and one data block, initializes `.` and `..`
+  records (mode 0755, links=2, size=1024, i_blocks=2), then persists the parent
+  link-count and group `bg_used_dirs_count` increments before inserting the
+  child entry. If any metadata write or the entry insertion fails, the count
+  values are restored and the allocated inode/block are freed, so a failed
+  mkdir leaves no dangling entry or stale counts. `bg_used_dirs_count` is
+  bounds-checked against `s_inodes_count` before incrementing.
+- **Metadata**: inode/block bitmaps, free counts in the superblock and group
+  descriptor, inode size/block counts/link count, and directory entries are
+  maintained on every mutation. Newly allocated blocks are zeroed. A per-mount
+  mutex serializes reads as well as metadata/data writes.
+
+Validation on mount: magic (0xEF53), revision 0, all three feature masks
+(compat, incompat, ro-compat) zero, 1 KiB block size, one block group, 128-byte inodes,
+non-zero geometry, in-range block/inode pointers, and valid directory record
+lengths. Mounting never formats — an invalid filesystem is silently skipped.
+
+Intentional limitations: no unlink, rmdir, symlinks, multi-block-group writes,
+or journaling. The `disktest` user utility exercises listing, reads, and writes;
+the `mkdir` utility creates directories from the shell.
 
 ---
 
@@ -440,6 +491,7 @@ Makefile's `USERPROGS` (`sh`, `hello`, `cat`, `wget`, ...).
 | Serial  | `drivers/serial.c`  | COM1; mirrors console output (used for logging/tests) |
 | PIT     | `kernel/pit.c`      | 200 Hz timer; IRQ0 drives the scheduler |
 | ATA     | `drivers/ata.c`     | Legacy primary/secondary PIO; IDENTIFY plus bounded polling LBA28 reads, writes, and cache flush |
+| ext2    | `kernel/ext2.c`     | Revision-0 ext2 read/write: mount validation, directory listing/lookup, file read (direct + singly-indirect), create/truncate/write, mkdir with bitmap/free-count/link-count maintenance; serialized by per-mount mutex |
 | Ethernet| `drivers/rtl8139.c` | RTL8139 over PCI; RX ring drained in IRQ context into `net_rx`, 4 bounce-buffered TX slots |
 | RTC     | `drivers/rtc.c`     | CMOS clock read once at boot; `SYS_TIME` extrapolates via the PIT tick counter |
 
@@ -450,7 +502,8 @@ a module tag; `panic` prints a message and a symbolic stack trace, then halts.
 and validates every request against the device capacity before dispatching it.
 ATA channels are mutex-serialized, and device interrupts stay disabled because
 this first storage path uses bounded polling. The initrd remains the root
-filesystem; no raw disk interface is exposed to ring 3.
+filesystem; ext2 is mounted as `/disk` when a valid filesystem is present on the
+first ATA device. No raw disk interface is exposed to ring 3.
 
 **Networking** (`kernel/net.c`, `kernel/tcp.c`): a minimal IPv4 stack sized
 for QEMU's user-mode (slirp) topology -- static config `10.0.2.15/24`, every
@@ -487,6 +540,10 @@ cryptographically strong.
   stack pointer `esp0` for the ring3→ring0 transition), and entering programs
   with an `iret` to the user segments instead of `0x08`. The `sh`/`hello`
   binaries won't need to change.
+- **ext2** is limited to revision 0, 1 KiB blocks, one block group, no
+  features. Supports read (direct + singly-indirect), create, truncate, write,
+  and mkdir for existing parent directories. No unlink, rmdir, symlinks,
+  multi-group writes, or journaling.
 - **Heap** doesn't split or coalesce; fixed 2.4 MiB.
 - **Scheduler** is plain round-robin, no priorities or sleeping (blocking calls
   busy-yield).
@@ -505,6 +562,7 @@ cryptographically strong.
 | `kernel/pic.c` | 8259 PIC remap |
 | `kernel/pit.c` | Timer (200 Hz) |
 | `kernel/block.c`, `drivers/ata.c` | Block-device registry and polling ATA PIO |
+| `kernel/ext2.c`, `include/ext2.h` | ext2 rev-0 read/write filesystem |
 | `kernel/pci.c` | PCI config-space access (mechanism #1) |
 | `drivers/rtl8139.c` | RTL8139 ethernet driver |
 | `drivers/rtc.c` | CMOS wall clock (SYS_TIME) |
@@ -517,10 +575,10 @@ cryptographically strong.
 | `kernel/task.c` | Tasks, `schedule`, `spawn_task`, `exit`, reaper |
 | `kernel/syscall.c` | `int 0x80` dispatch and syscalls |
 | `kernel/elf.c` | ELF loader |
-| `kernel/vfs.c`, `kernel/initrd.c` | VFS + initrd (tar) |
+| `kernel/vfs.c`, `kernel/initrd.c` | VFS (hierarchical path resolution) + initrd (tar) |
 | `kernel/vga.c`, `drivers/keyboard.c`, `drivers/serial.c` | Drivers |
 | `kernel/kernel.c` | `kprintf`/`mprintf`/`panic`, symbol table, stack traces |
-| `user/sh.c`, `user/hello.c`, `user/wget.c`, `user/user.ld` | Userspace programs |
+| `user/sh.c`, `user/hello.c`, `user/disktest.c`, `user/mkdir.c`, `user/wget.c`, `user/browser.c`, `user/user.ld` | Userspace programs |
 | `include/*.h` | Public headers for each subsystem |
 
 ---

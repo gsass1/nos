@@ -15,6 +15,7 @@ ex.txt
 LOG
 MON
 tests/serial.log
+tests/ext2_serial.log
 tests/serial_net.log
 tests/screen.ppm
 tests/browser_screen.ppm

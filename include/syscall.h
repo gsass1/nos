@@ -47,6 +47,17 @@
 #define SYS_WSEND   34  // wsend(slot, const struct wev *ev) -> 0, or -1
 #define SYS_WUNMAP  35  // wunmap(slot)                -> 0; server releases its mapping
 
+#define SYS_OPENMODE 36 // openmode(const char *path, int flags) -> fd, or -1
+#define SYS_LISTDIR  37  // listdir(const char *path, uint idx, char *name[128]) -> 0, or -1 at end
+#define SYS_MKDIR    38  // mkdir(const char *path) -> 0, or -1
+
+// Flags for SYS_OPENMODE (backward-compatible: SYS_OPEN is read-only).
+#define O_RDONLY  0x0
+#define O_WRONLY  0x1
+#define O_RDWR    0x2
+#define O_CREATE  0x4
+#define O_TRUNC   0x8
+
 // Window-surface limits (part of the ABI: servers poll slots 0..WSURF_SLOTS-1).
 #define WSURF_SLOTS 3
 #define WSURF_MAX_W 800

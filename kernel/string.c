@@ -245,3 +245,13 @@ int strcmp(const char *s1, const char *s2)
         return 0;
     return ((*(unsigned char *)s1 < *(unsigned char *)s2) ? -1 : +1);
 }
+
+int memcmp(const void *s1, const void *s2, size_t n)
+{
+    const uint8_t *p1 = s1, *p2 = s2;
+    for (; n != 0; n--, p1++, p2++) {
+        if (*p1 != *p2)
+            return (*p1 < *p2) ? -1 : 1;
+    }
+    return 0;
+}

@@ -1,5 +1,7 @@
 #include <ata.h>
+#include <block.h>
 #include <elf.h>
+#include <ext2.h>
 #include <fb.h>
 #include <gdt.h>
 #include <idt.h>
@@ -120,7 +122,18 @@ void kmain(struct multiboot *multiboot, uint32_t initial_stack)
 
 	// Initialize initial ram disk
     fs_root = initrd_init((void *)(*(uint32_t *)mbootptr->mods_addr));
-  
+
+    // Try to mount an ext2 filesystem from the first ATA block device at
+    // /disk. The initrd remains the root FS; ext2 is a mountpoint under it.
+    // If no disk is present or it is not a valid ext2 filesystem, /disk is
+    // simply absent -- normal boot proceeds unchanged. Never formats.
+    if (block_count() > 0) {
+        struct fs_node *ext2_root = ext2_mount(block_get(0));
+        if (ext2_root) {
+            initrd_set_disk_mount(ext2_root);
+        }
+    }
+
 	// Initialize symbol resolution
 	sym_init();
 
