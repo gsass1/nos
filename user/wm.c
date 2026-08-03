@@ -32,7 +32,7 @@
 
 #define MENU_W    160
 #define MENU_ITEM_H 24
-#define MENU_ITEMS  3
+#define MENU_ITEMS  4
 #define MENU_H    (MENU_ITEMS * MENU_ITEM_H + 8)
 
 // Terminal windows: fixed character grid rendered into the body.
@@ -71,8 +71,13 @@ struct win
 static struct win wins[MAXWIN];
 static int zorder[MAXWIN]; // bottom to top, alive windows only
 static int nz;
-static int next_no = 3;    // names for menu-spawned windows
+static int next_no = 1;    // names for menu-spawned windows
 static int menu_open;
+
+// Start-menu entries; order matches the click dispatch in the main loop.
+static const char *menu_items[MENU_ITEMS] = {
+    "terminal", "browser", "new window", "about"
+};
 
 static struct gfx bb;             // backbuffer
 static volatile unsigned int *fb; // real framebuffer
@@ -285,9 +290,9 @@ static void draw_all(int cx, int cy)
         int my = bb.h - TASKBAR_H - MENU_H;
         gfx_fill(&bb, 4, my, MENU_W, MENU_H, COL_MENU);
         gfx_frame(&bb, 4, my, MENU_W, MENU_H, COL_BORDER);
-        gfx_text(&bb, 16, my + 8, "terminal", COL_TEXT);
-        gfx_text(&bb, 16, my + 8 + MENU_ITEM_H, "new window", COL_TEXT);
-        gfx_text(&bb, 16, my + 8 + 2 * MENU_ITEM_H, "about", COL_TEXT);
+        for (int i = 0; i < MENU_ITEMS; i++) {
+            gfx_text(&bb, 16, my + 8 + i * MENU_ITEM_H, menu_items[i], COL_TEXT);
+        }
     }
 
     gfx_cursor(&bb, cx, cy);
@@ -472,19 +477,6 @@ void _start(void)
         exit(1);
     }
 
-    // Initial demo windows (fixed geometry: the test suite asserts on it).
-    struct win *w = &wins[0];
-    w->alive = 1; w->x = 140; w->y = 120; w->w = 400; w->h = 300;
-    w->surf = -1;
-    scopy(w->title, "welcome", sizeof(w->title));
-    w = &wins[1];
-    w->alive = 1; w->x = 420; w->y = 260; w->w = 360; w->h = 240;
-    w->surf = -1;
-    scopy(w->title, "notes", sizeof(w->title));
-    zorder[0] = 0;
-    zorder[1] = 1;
-    nz = 2;
-
     struct mouse_state m, prev;
     mouse(&prev);
     int dragging = -1, resizing = -1;
@@ -492,6 +484,11 @@ void _start(void)
 
     draw_all(prev.x, prev.y);
     put("wm: started\n");
+
+    // Initial layout: a single terminal in slot 0 (140,120 360x240 -- the
+    // test suite asserts on this geometry). Spawned after the started
+    // marker so the sh banner always follows it in the serial log.
+    spawn_terminal();
 
     for (;;) {
         mouse(&m);
@@ -535,8 +532,12 @@ void _start(void)
                 if (item == 0) {
                     spawn_terminal();
                 } else if (item == 1) {
-                    spawn(0);
+                    // wm holds the display, so the browser falls back to
+                    // SYS_WCREATE and poll_surfaces() windows it.
+                    exec("browser", 0);
                 } else if (item == 2) {
+                    spawn(0);
+                } else if (item == 3) {
                     spawn_about();
                 }
             }

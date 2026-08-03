@@ -373,12 +373,13 @@ def main():
             failures.append("text mode not restored after a crash in graphics mode")
 
         # Window manager: a full scripted desktop session. Initial layout:
-        # win1 "welcome" (140,120,400x300) unfocused (gray title), win2
-        # "notes" (420,260,360x240) focused (navy title). The cursor position
-        # is tracked in `cur` after one corner-clamp reset, giving absolute
-        # positioning for every subsequent click.
+        # a single terminal window in slot 0 (140,120, 360x240) running sh,
+        # focused (navy title). The cursor position is tracked in `cur` after
+        # one corner-clamp reset, giving absolute positioning for every
+        # subsequent click.
         sh.type_line("wm")
         if sh.wait_for("wm: started", "wm start"):
+            sh.wait_for("nsh - NOS userspace shell", "startup terminal banner")
             time.sleep(1.0)
             cur = [0, 0]
 
@@ -403,125 +404,121 @@ def main():
             dump("wm1.ppm", [
                 (8, 8, (0, 128, 128), "desktop"),
                 (512, 760, (192, 192, 192), "taskbar"),
-                (340, 132, (128, 128, 128), "win1 title (unfocused)"),
-                (340, 200, (255, 255, 255), "win1 body"),
-                (600, 272, (0, 0, 128), "win2 title (focused)"),
+                (300, 132, (0, 0, 128), "terminal title (focused)"),
+                (300, 300, (0, 0, 0), "terminal body black"),
             ], "wm initial")
 
             mouse_reset(sh)
 
-            # Drag win2 by its title bar from (600,272) by +120,+60.
-            mouse_to(600, 272)
-            sh.monitor("mouse_button 1")
-            time.sleep(0.4)
-            mouse_to(720, 332)
-            sh.monitor("mouse_button 0")
-            time.sleep(0.6)
-            dump("wm2.ppm", [
-                (700, 330, (0, 0, 128), "win2 title after drag"),
-                (600, 272, (0, 128, 128), "desktop where win2 was"),
-            ], "wm after drag")
-
-            # Close win2 via its X button (win2 now at 540,320, 360 wide:
-            # close box center is x+w-21+9, y+3+9). Focus falls to win1.
-            mouse_to(888, 332)
-            click()
-            dump("wm3.ppm", [
-                (700, 330, (0, 128, 128), "desktop after close"),
-                (340, 132, (0, 0, 128), "win1 title focused after close"),
-            ], "wm close button")
-
-            # Start menu opens above the taskbar; "new window" spawns into
-            # slot 1 (freed by the close) at (180,152), 360x240, focused.
-            mouse_to(30, 752)
-            click()
-            dump("wm4.ppm", [
-                (20, 716, (232, 232, 232), "start menu open"),
-            ], "wm start menu")
-            mouse_to(80, 696)
-            click()
-            dump("wm5.ppm", [
-                (280, 164, (0, 0, 128), "new window title (focused)"),
-                (340, 132, (128, 128, 128), "win1 title unfocused again"),
-            ], "wm new window")
-
-            # Minimize the new window via its _ button (box center
-            # x+w-2*18-5+9, y+3+9 = 508,164); (280,164) then shows win1 body.
-            mouse_to(508, 164)
-            click()
-            dump("wm6.ppm", [
-                (280, 164, (255, 255, 255), "win1 body where minimized win was"),
-                (340, 132, (0, 0, 128), "win1 focused after minimize"),
-            ], "wm minimize")
-
-            # Restore it from its taskbar entry (second entry: 232..384).
-            mouse_to(300, 752)
-            click()
-            dump("wm7.ppm", [
-                (280, 164, (0, 0, 128), "restored window title focused"),
-            ], "wm restore from taskbar")
-
-            # Terminal: menu item 0 spawns a window running the real sh over
-            # a console channel (slot 2 -> 220,184, 360x240, focused). Keys
-            # are forwarded to it; output of it AND its children renders in
-            # the window (and mirrors to serial, which we assert on).
-            mouse_to(30, 752)
-            click()
-            mouse_to(80, 672)
-            click()
-            sh.wait_for("nsh - NOS userspace shell", "terminal sh banner")
-            time.sleep(0.8)
-            dump("wm8.ppm", [
-                (300, 300, (0, 0, 0), "terminal body black"),
-            ], "wm terminal window")
+            # The startup terminal has focus: keys reach the sh inside it;
+            # output of it AND its children renders in the window (and
+            # mirrors to serial, which we assert on).
             for k in "hello":
                 sh.monitor("sendkey " + k)
                 time.sleep(0.15)
             sh.monitor("sendkey ret")
             sh.wait_for("Hello from a loaded ELF program",
-                        "hello ran inside the terminal")
+                        "hello ran inside the startup terminal")
+
+            # Start menu opens above the taskbar (4 items: terminal,
+            # browser, new window, about -> top edge at y=632).
+            mouse_to(30, 752)
+            click()
+            dump("wm2.ppm", [
+                (150, 640, (232, 232, 232), "start menu top (4 items)"),
+                (20, 716, (232, 232, 232), "start menu bottom"),
+            ], "wm start menu")
+
+            # "new window" (item 2) spawns into slot 1 at (180,152),
+            # 360x240, focused; the terminal drops to unfocused gray.
+            mouse_to(80, 696)
+            click()
+            dump("wm3.ppm", [
+                (350, 164, (0, 0, 128), "new window title (focused)"),
+                (300, 132, (128, 128, 128), "terminal title unfocused"),
+            ], "wm new window")
+
+            # Drag the new window by its title bar from (350,164) by
+            # +200,+100: it lands at (380,252).
+            mouse_to(350, 164)
+            sh.monitor("mouse_button 1")
+            time.sleep(0.4)
+            mouse_to(550, 264)
+            sh.monitor("mouse_button 0")
+            time.sleep(0.6)
+            dump("wm4.ppm", [
+                (650, 264, (0, 0, 128), "new window title after drag"),
+                (350, 164, (0, 0, 0), "terminal body where the window was"),
+            ], "wm after drag")
+
+            # Close it via its X button (window at 380,252, 360 wide: close
+            # box center is x+w-21+9, y+3+9). Focus falls to the terminal.
+            mouse_to(728, 264)
+            click()
+            dump("wm5.ppm", [
+                (650, 264, (0, 128, 128), "desktop after close"),
+                (300, 132, (0, 0, 128), "terminal title focused after close"),
+            ], "wm close button")
+
+            # Minimize the terminal via its _ button (box center
+            # x+w-2*18-5+9, y+3+9 = 468,132); its taskbar entry grays out.
+            mouse_to(468, 132)
+            click()
+            dump("wm6.ppm", [
+                (300, 300, (0, 128, 128), "desktop where minimized terminal was"),
+                (200, 750, (144, 144, 144), "taskbar entry minimized"),
+            ], "wm minimize")
+
+            # Restore it from its taskbar entry (first entry: 72..224).
+            mouse_to(150, 752)
+            click()
+            dump("wm7.ppm", [
+                (300, 132, (0, 0, 128), "restored terminal title focused"),
+                (300, 300, (0, 0, 0), "restored terminal body"),
+            ], "wm restore from taskbar")
+
+            # Menu item 0 spawns a second terminal (slot 1 -> 180,152,
+            # 360x240, focused) over a console channel. `exit` inside it,
+            # then its X: the clean close path, no kill needed.
+            mouse_to(30, 752)
+            click()
+            mouse_to(80, 648)
+            click()
+            sh.wait_for("nsh - NOS userspace shell", "second terminal banner")
             for k in "exit":
                 sh.monitor("sendkey " + k)
                 time.sleep(0.15)
             sh.monitor("sendkey ret")
             sh.wait_for("bye!", "terminal shell exited")
-
-            # Close the (now dead) terminal via its X: the clean path, no
-            # kill needed. Terminal is slot 2 at (220,184), 360 wide.
-            mouse_to(568, 196)
+            mouse_to(528, 164)
             click()
 
-            # Second terminal (slot 2 reused, same geometry): run `spin`.
+            # Third terminal (slot 1 reused, same geometry): run `spin`.
             # The shell blocks in SYS_WAIT on a child that never exits, so
             # closing this terminal exercises the SYS_KILL escalation.
             mouse_to(30, 752)
             click()
-            mouse_to(80, 672)
+            mouse_to(80, 648)
             click()
-            sh.wait_for("nsh - NOS userspace shell", "second terminal banner")
+            sh.wait_for("nsh - NOS userspace shell", "third terminal banner")
             for k in "spin":
                 sh.monitor("sendkey " + k)
                 time.sleep(0.15)
             sh.monitor("sendkey ret")
             sh.wait_for("spin: spinning", "spin runs inside the terminal")
             time.sleep(0.5)
-            mouse_to(568, 196)
+            mouse_to(528, 164)
             click()
             sh.wait_for("wm: killed pid", "unresponsive shell was killed")
 
-            # Window surfaces: a graphics client under wm renders into its
-            # own offscreen buffer (SYS_WCREATE) which wm composites as a
-            # window and routes input to. Launch the browser from a fresh
-            # terminal; it must window itself instead of grabbing the fb.
+            # Window surfaces: "browser" in the start menu (item 1) execs
+            # the graphics client. wm holds the display, so it must render
+            # into its own offscreen buffer (SYS_WCREATE) which wm
+            # composites as a window and routes input to.
             mouse_to(30, 752)
             click()
             mouse_to(80, 672)
             click()
-            sh.wait_for("nsh - NOS userspace shell", "surface-test terminal")
-            for k in "browser":
-                sh.monitor("sendkey " + k)
-                time.sleep(0.15)
-            sh.monitor("sendkey ret")
             if sh.wait_for("wm: surface 'browser' 780x540", "browser surface"):
                 time.sleep(1.5)  # first composited frame
                 sppm = os.path.join(REPO, "tests", "surface.ppm")
