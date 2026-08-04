@@ -5,7 +5,7 @@
 // holding the display, to exercise the kernel's restore-on-death path.
 #include "ulib.h"
 
-void _start(int argc, char **argv)
+int main(int argc, char **argv)
 {
     struct fb_info info;
     if (fbinfo(&info) != 0) {

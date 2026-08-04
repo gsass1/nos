@@ -332,6 +332,11 @@ def main():
         # (a panic) or reading/writing kernel memory on the caller's behalf.
         sh.run("badptr", ["badptr: all hostile pointers rejected"], "hostile pointers")
 
+        # User libc: the program self-checks malloc/free/realloc coalescing,
+        # printf/snprintf formatting, string.h, and strtol, printing a FAIL
+        # line per broken check and one marker when everything held.
+        sh.run("libctest", ["libctest: all tests passed"], "libc self-test")
+
         # Framebuffer: fbtest switches to 1024x768x32 graphics, draws four
         # colored quadrants and holds them; screendump the emulated display
         # and check actual pixel colors, then confirm text mode comes back.
@@ -566,8 +571,8 @@ def main():
             print("  - " + f)
         return 1
     print("PASS (boot, ls, exec/wait, argv, file io, sbrk, pipes, redirects, "
-          "error paths, fault isolation, hostile pointers, shift keys, mouse, "
-          "framebuffer, fb ownership, window surfaces, vga screen)")
+          "error paths, fault isolation, hostile pointers, libc, shift keys, "
+          "mouse, framebuffer, fb ownership, window surfaces, vga screen)")
     return 0
 
 

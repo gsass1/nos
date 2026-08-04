@@ -1,4 +1,5 @@
 #include "ulib.h"
+#include <stdlib.h>
 
 #define BUFSZ 1024
 
@@ -46,8 +47,8 @@ static int match(const char *re, const char *text)
 
 static int grep(int fd, const char *pattern)
 {
-    char *buf = sbrk(BUFSZ);
-    if (buf == (char *)-1) {
+    char *buf = malloc(BUFSZ);
+    if (!buf) {
         return -1;
     }
     int capacity = BUFSZ;
@@ -56,10 +57,12 @@ static int grep(int fd, const char *pattern)
 
     for (;;) {
         if (used == capacity - 1) {
-            char *more = sbrk(BUFSZ);
-            if (more == (char *)-1 || more != buf + capacity) {
+            char *more = realloc(buf, (size_t)capacity + BUFSZ);
+            if (!more) {
+                free(buf);
                 return -1;
             }
+            buf = more;
             capacity += BUFSZ;
         }
         n = read(fd, buf + used, capacity - used - 1);
@@ -97,10 +100,11 @@ static int grep(int fd, const char *pattern)
             write(1, buf, used);
         }
     }
+    free(buf);
     return n;
 }
 
-void _start(int argc, char **argv)
+int main(int argc, char **argv)
 {
     if (argc < 2) {
         put("usage: grep pattern [file ...]\n");

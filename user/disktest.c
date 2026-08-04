@@ -7,6 +7,7 @@
 // With "verify": lists /disk, reads /disk/hello.txt and /disk/written.txt
 // (proving the guest-written file persists across a reboot).
 #include "ulib.h"
+#include <stdlib.h>
 
 #define BUFSZ 512
 
@@ -35,10 +36,10 @@ static int cat_file(const char *path, char *buf)
     return n; // 0 at EOF, -1 on error
 }
 
-void _start(int argc, char **argv)
+int main(int argc, char **argv)
 {
-    char *buf = sbrk(BUFSZ);
-    if (buf == (char *)-1) {
+    char *buf = malloc(BUFSZ);
+    if (!buf) {
         put("disktest: out of memory\n");
         exit(1);
     }

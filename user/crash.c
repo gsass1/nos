@@ -3,7 +3,7 @@
 // and the shell must keep running afterwards.
 #include "ulib.h"
 
-void _start(void)
+int main(void)
 {
     put("crash: dereferencing NULL from ring 3...\n");
 

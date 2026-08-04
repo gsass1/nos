@@ -238,7 +238,7 @@ static void run(char *line)
     }
 }
 
-void _start(void)
+int main(void)
 {
     char buf[128];
 

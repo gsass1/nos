@@ -20,7 +20,7 @@ INITRD=initrd/initrd.tar
 
 # Freestanding userspace programs bundled into the initrd. They talk to the
 # kernel only through the int 0x80 syscall ABI (include/syscall.h).
-USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr initrd/disktest initrd/mkdir initrd/wget initrd/browser
+USERPROGS=initrd/hello initrd/sh initrd/crash initrd/cat initrd/echo initrd/grep initrd/wc initrd/fbtest initrd/mtest initrd/wm initrd/spin initrd/upper initrd/badptr initrd/disktest initrd/mkdir initrd/libctest initrd/wget initrd/browser
 OBJ=boot/boot.o \
 	drivers/keyboard.o \
 	drivers/mouse.o \
@@ -94,8 +94,26 @@ $(BEARSSL_BUILD)/%.o: $(BEARSSL_DIR)/src/%.c
 $(BEARSSL_LIB): $(BEARSSL_OBJ)
 	$(AR) rcs $@ $(BEARSSL_OBJ)
 
-user/libc/libc.o: user/libc/libc.c user/libc/string.h
-	$(CC) -c user/libc/libc.c -o user/libc/libc.o $(CFLAGS)
+# The user-side libc, linked into every user program: crt0 (_start -> main),
+# string.h in libc.c, malloc/strtol in stdlib.c, printf in stdio.c. Plain
+# objects rather than an archive so link order against BearSSL never matters.
+ULIBC=user/libc/crt0.o user/libc/libc.o user/libc/stdlib.o user/libc/stdio.o
+ULIBC_DEPS=$(ULIBC) user/ulib.h user/user.ld include/syscall.h
+# -Iuser/libc comes first so the user string.h/stdio.h shadow the kernel's
+# headers in include/ (which stays on the path for syscall.h/stdint.h).
+UCFLAGS=-Iuser/libc $(CFLAGS)
+
+user/libc/crt0.o: user/libc/crt0.c user/ulib.h include/syscall.h
+	$(CC) -c user/libc/crt0.c -o user/libc/crt0.o $(UCFLAGS)
+
+user/libc/libc.o: user/libc/libc.c user/libc/string.h user/libc/stdlib.h
+	$(CC) -c user/libc/libc.c -o user/libc/libc.o $(UCFLAGS)
+
+user/libc/stdlib.o: user/libc/stdlib.c user/libc/stdlib.h user/libc/string.h user/libc/limits.h user/ulib.h include/syscall.h
+	$(CC) -c user/libc/stdlib.c -o user/libc/stdlib.o $(UCFLAGS)
+
+user/libc/stdio.o: user/libc/stdio.c user/libc/stdio.h user/libc/string.h user/ulib.h include/syscall.h
+	$(CC) -c user/libc/stdio.c -o user/libc/stdio.o $(UCFLAGS)
 
 boot/boot.o: boot/boot.S
 	$(AS) boot/boot.S -o boot/boot.o $(AFLAGS)
@@ -221,83 +239,87 @@ $(USERPROGS): | initrd-dir
 initrd-dir:
 	mkdir -p initrd
 
-initrd/hello: user/hello.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/hello.c -o user/hello.o $(CFLAGS)
-	$(LD) -T user/user.ld user/hello.o -o initrd/hello
+initrd/hello: user/hello.c $(ULIBC_DEPS)
+	$(CC) -c user/hello.c -o user/hello.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/hello.o $(ULIBC) -o initrd/hello
 
-initrd/sh: user/sh.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/sh.c -o user/sh.o $(CFLAGS)
-	$(LD) -T user/user.ld user/sh.o -o initrd/sh
+initrd/sh: user/sh.c $(ULIBC_DEPS)
+	$(CC) -c user/sh.c -o user/sh.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/sh.o $(ULIBC) -o initrd/sh
 
-initrd/crash: user/crash.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/crash.c -o user/crash.o $(CFLAGS)
-	$(LD) -T user/user.ld user/crash.o -o initrd/crash
+initrd/crash: user/crash.c $(ULIBC_DEPS)
+	$(CC) -c user/crash.c -o user/crash.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/crash.o $(ULIBC) -o initrd/crash
 
-initrd/cat: user/cat.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/cat.c -o user/cat.o $(CFLAGS)
-	$(LD) -T user/user.ld user/cat.o -o initrd/cat
+initrd/cat: user/cat.c $(ULIBC_DEPS)
+	$(CC) -c user/cat.c -o user/cat.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/cat.o $(ULIBC) -o initrd/cat
 
-initrd/echo: user/echo.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/echo.c -o user/echo.o $(CFLAGS)
-	$(LD) -T user/user.ld user/echo.o -o initrd/echo
+initrd/echo: user/echo.c $(ULIBC_DEPS)
+	$(CC) -c user/echo.c -o user/echo.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/echo.o $(ULIBC) -o initrd/echo
 
-initrd/grep: user/grep.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/grep.c -o user/grep.o $(CFLAGS)
-	$(LD) -T user/user.ld user/grep.o -o initrd/grep
+initrd/grep: user/grep.c $(ULIBC_DEPS)
+	$(CC) -c user/grep.c -o user/grep.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/grep.o $(ULIBC) -o initrd/grep
 
-initrd/wc: user/wc.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/wc.c -o user/wc.o $(CFLAGS)
-	$(LD) -T user/user.ld user/wc.o -o initrd/wc
+initrd/wc: user/wc.c $(ULIBC_DEPS)
+	$(CC) -c user/wc.c -o user/wc.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/wc.o $(ULIBC) -o initrd/wc
 
-initrd/fbtest: user/fbtest.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/fbtest.c -o user/fbtest.o $(CFLAGS)
-	$(LD) -T user/user.ld user/fbtest.o -o initrd/fbtest
+initrd/fbtest: user/fbtest.c $(ULIBC_DEPS)
+	$(CC) -c user/fbtest.c -o user/fbtest.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/fbtest.o $(ULIBC) -o initrd/fbtest
 
-initrd/mtest: user/mtest.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/mtest.c -o user/mtest.o $(CFLAGS)
-	$(LD) -T user/user.ld user/mtest.o -o initrd/mtest
+initrd/mtest: user/mtest.c $(ULIBC_DEPS)
+	$(CC) -c user/mtest.c -o user/mtest.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/mtest.o $(ULIBC) -o initrd/mtest
 
-initrd/wm: user/wm.c user/gfx.h user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/wm.c -o user/wm.o $(CFLAGS)
-	$(LD) -T user/user.ld user/wm.o -o initrd/wm
+initrd/wm: user/wm.c user/gfx.h $(ULIBC_DEPS)
+	$(CC) -c user/wm.c -o user/wm.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/wm.o $(ULIBC) -o initrd/wm
 
-initrd/spin: user/spin.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/spin.c -o user/spin.o $(CFLAGS)
-	$(LD) -T user/user.ld user/spin.o -o initrd/spin
+initrd/spin: user/spin.c $(ULIBC_DEPS)
+	$(CC) -c user/spin.c -o user/spin.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/spin.o $(ULIBC) -o initrd/spin
 
-initrd/upper: user/upper.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/upper.c -o user/upper.o $(CFLAGS)
-	$(LD) -T user/user.ld user/upper.o -o initrd/upper
+initrd/upper: user/upper.c $(ULIBC_DEPS)
+	$(CC) -c user/upper.c -o user/upper.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/upper.o $(ULIBC) -o initrd/upper
 
-initrd/badptr: user/badptr.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/badptr.c -o user/badptr.o $(CFLAGS)
-	$(LD) -T user/user.ld user/badptr.o -o initrd/badptr
+initrd/badptr: user/badptr.c $(ULIBC_DEPS)
+	$(CC) -c user/badptr.c -o user/badptr.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/badptr.o $(ULIBC) -o initrd/badptr
 
-initrd/disktest: user/disktest.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/disktest.c -o user/disktest.o $(CFLAGS)
-	$(LD) -T user/user.ld user/disktest.o -o initrd/disktest
+initrd/disktest: user/disktest.c $(ULIBC_DEPS)
+	$(CC) -c user/disktest.c -o user/disktest.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/disktest.o $(ULIBC) -o initrd/disktest
 
-initrd/mkdir: user/mkdir.c user/ulib.h user/user.ld include/syscall.h
-	$(CC) -c user/mkdir.c -o user/mkdir.o $(CFLAGS)
-	$(LD) -T user/user.ld user/mkdir.o -o initrd/mkdir
+initrd/mkdir: user/mkdir.c $(ULIBC_DEPS)
+	$(CC) -c user/mkdir.c -o user/mkdir.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/mkdir.o $(ULIBC) -o initrd/mkdir
 
-# wget links BearSSL for https; the shim libc satisfies BearSSL's five libc
-# imports (and gcc's own memcpy/memset emissions).
-initrd/wget: user/wget.c user/trust_anchors.h user/ulib.h user/user.ld include/syscall.h user/libc/libc.o $(BEARSSL_LIB)
-	$(CC) -c user/wget.c -o user/wget.o $(CFLAGS) -I$(BEARSSL_DIR)/inc
-	$(LD) -T user/user.ld user/wget.o user/libc/libc.o -o initrd/wget $(BEARSSL_LIB)
+initrd/libctest: user/libctest.c user/libc/stdio.h user/libc/stdlib.h user/libc/string.h $(ULIBC_DEPS)
+	$(CC) -c user/libctest.c -o user/libctest.o $(UCFLAGS)
+	$(LD) -T user/user.ld user/libctest.o $(ULIBC) -o initrd/libctest
+
+# wget links BearSSL for https; the libc satisfies BearSSL's imports
+# (and gcc's own memcpy/memset emissions).
+initrd/wget: user/wget.c user/trust_anchors.h $(ULIBC_DEPS) $(BEARSSL_LIB)
+	$(CC) -c user/wget.c -o user/wget.o $(UCFLAGS) -I$(BEARSSL_DIR)/inc
+	$(LD) -T user/user.ld user/wget.o $(ULIBC) -o initrd/wget $(BEARSSL_LIB)
 
 # browser renders HTML on the framebuffer; it fetches like wget, so it links
-# BearSSL and the shim libc the same way.
-initrd/browser: user/browser.c user/gfx.h user/trust_anchors.h user/ulib.h user/user.ld include/syscall.h user/libc/libc.o $(BEARSSL_LIB)
-	$(CC) -c user/browser.c -o user/browser.o $(CFLAGS) -I$(BEARSSL_DIR)/inc
-	$(LD) -T user/user.ld user/browser.o user/libc/libc.o -o initrd/browser $(BEARSSL_LIB)
+# BearSSL the same way.
+initrd/browser: user/browser.c user/gfx.h user/trust_anchors.h $(ULIBC_DEPS) $(BEARSSL_LIB)
+	$(CC) -c user/browser.c -o user/browser.o $(UCFLAGS) -I$(BEARSSL_DIR)/inc
+	$(LD) -T user/user.ld user/browser.o $(ULIBC) -o initrd/browser $(BEARSSL_LIB)
 
 # Regenerate the initrd: an address-sorted symbol table matching the current
 # kernel build (so backtraces resolve names) plus the bundled user programs.
 $(INITRD): $(BIN) $(USERPROGS)
 	$(NM) -n $(BIN) > initrd/symtable
-	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr disktest mkdir wget browser
+	cd initrd && tar --format ustar -cf initrd.tar symtable hello sh crash cat echo grep wc fbtest mtest wm spin upper badptr disktest mkdir libctest wget browser
 
 initrd: $(INITRD)
 
@@ -333,6 +355,6 @@ clean:
 	rm -f $(OBJ)
 	rm -f $(BIN)
 	rm -f $(ISO)
-	rm -f user/*.o user/libc/libc.o
+	rm -f user/*.o user/libc/*.o
 	rm -rf $(BEARSSL_BUILD)
 	rm -rf initrd

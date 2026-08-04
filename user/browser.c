@@ -12,7 +12,8 @@
 // tests can drive the UI blind via sendkey.
 #include "ulib.h"
 #include "gfx.h"
-#include "libc/string.h"
+#include <stdlib.h>
+#include <string.h>
 #include <bearssl.h>
 #include "trust_anchors.h"
 
@@ -64,7 +65,7 @@ struct url
     char path[URL_CAP];
 };
 
-// Big buffers come from sbrk; only the TLS engine's working set is static.
+// Big buffers come from malloc; only the TLS engine's working set is static.
 static struct gfx bb;             // backbuffer
 static volatile unsigned int *fb; // framebuffer, or the window surface pixels
 static struct fb_info info;
@@ -1612,7 +1613,7 @@ static void handle_click(int x, int y)
 
 // ------------------------------------------------------------------ main
 
-void _start(int argc, char **argv)
+int main(int argc, char **argv)
 {
     if (fbinfo(&info) != 0) {
         put("browser: no framebuffer\n");
@@ -1642,13 +1643,12 @@ void _start(int argc, char **argv)
         out_pitch = WIN_W * 4;
     }
 
-    bb.buf = sbrk(bb.w * bb.h * 4);
-    page = sbrk(PAGE_CAP);
-    text = sbrk(TEXT_CAP);
-    spans = sbrk(MAX_SPANS * (int)sizeof(struct span));
-    links = sbrk(MAX_LINKS * (int)sizeof(struct linkent));
-    if (bb.buf == (void *)-1 || page == (void *)-1 || text == (void *)-1 ||
-        spans == (void *)-1 || links == (void *)-1) {
+    bb.buf = malloc((size_t)bb.w * bb.h * 4);
+    page = malloc(PAGE_CAP);
+    text = malloc(TEXT_CAP);
+    spans = malloc(MAX_SPANS * sizeof(struct span));
+    links = malloc(MAX_LINKS * sizeof(struct linkent));
+    if (!bb.buf || !page || !text || !spans || !links) {
         put("browser: out of memory\n");
         exit(1);
     }

@@ -3,7 +3,7 @@
 // stdin has closed (the other stage exiting, or being killed).
 #include "ulib.h"
 
-void _start(void)
+int main(void)
 {
     char buf[512];
     int n;

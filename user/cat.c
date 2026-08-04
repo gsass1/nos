@@ -1,5 +1,6 @@
 // cat -- copy stdin or initrd files to stdout.
 #include "ulib.h"
+#include <stdlib.h>
 
 #define BUFSZ 4096
 
@@ -15,10 +16,10 @@ static int copy(int fd, char *buf)
     return n;
 }
 
-void _start(int argc, char **argv)
+int main(int argc, char **argv)
 {
-    char *buf = sbrk(BUFSZ);
-    if (buf == (char *)-1) {
+    char *buf = malloc(BUFSZ);
+    if (!buf) {
         put("cat: out of memory\n");
         exit(1);
     }

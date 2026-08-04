@@ -3,7 +3,7 @@
 // the QEMU monitor and asserts on these lines.
 #include "ulib.h"
 
-void _start(void)
+int main(void)
 {
     struct mouse_state m, last;
     mouse(&last);

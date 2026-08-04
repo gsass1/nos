@@ -3,7 +3,7 @@
 // Usage: mkdir disk/path
 #include "ulib.h"
 
-void _start(int argc, char **argv)
+int main(int argc, char **argv)
 {
     if (argc < 2) {
         put("usage: mkdir <path>\n");

@@ -194,7 +194,7 @@ static void tls_fail(const char *when)
 
 // --------------------------------------------------------------------- main
 
-void _start(int argc, char **argv)
+int main(int argc, char **argv)
 {
     int insecure = 0;
     const char *args[3];

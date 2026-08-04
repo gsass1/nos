@@ -12,6 +12,7 @@
 // themselves automatically when wm holds it.
 #include "ulib.h"
 #include "gfx.h"
+#include <stdlib.h>
 
 #define COL_DESKTOP  0x00008080
 #define COL_TASKBAR  0x00C0C0C0
@@ -458,7 +459,7 @@ static void spawn_about(void)
     wins[slot].tlen = slen(t); // typed input appends after the preset
 }
 
-void _start(void)
+int main(void)
 {
     if (fbinfo(&info) != 0 || gfx_init_font() != 0) {
         put("wm: no framebuffer\n");
@@ -466,8 +467,8 @@ void _start(void)
     }
     bb.w = info.width;
     bb.h = info.height;
-    bb.buf = sbrk(bb.w * bb.h * 4);
-    if (bb.buf == (unsigned int *)-1) {
+    bb.buf = malloc((size_t)bb.w * bb.h * 4);
+    if (!bb.buf) {
         put("wm: out of memory\n");
         exit(1);
     }

@@ -15,7 +15,7 @@ static void check(const char *what, int got)
     }
 }
 
-void _start(void)
+int main(void)
 {
     char *kaddr = (char *)0x00100000;    // kernel identity map
     char *unmapped = (char *)0x7FF00000; // inside the user window, never mapped

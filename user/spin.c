@@ -3,7 +3,7 @@
 // never exit on its own.
 #include "ulib.h"
 
-void _start(void)
+int main(void)
 {
     put("spin: spinning\n");
     for (;;) {

@@ -46,7 +46,7 @@ static int count(int fd, const char *name)
     return 0;
 }
 
-void _start(int argc, char **argv)
+int main(int argc, char **argv)
 {
     if (argc == 1) {
         exit(count(0, 0) < 0);
